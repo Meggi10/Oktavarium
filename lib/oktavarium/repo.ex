@@ -1,4 +1,5 @@
 defmodule Oktavarium.Repo do
+  @moduledoc false
   use Ecto.Repo,
     otp_app: :oktavarium,
     adapter: Ecto.Adapters.SQLite3
