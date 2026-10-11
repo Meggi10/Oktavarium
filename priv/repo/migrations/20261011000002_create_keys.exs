@@ -2,7 +2,7 @@ defmodule Oktavarium.Repo.Migrations.CreateKeys do
   use Ecto.Migration
 
   def change do
-    create table(:keys) do
+    create table(:keys, primary_key: [name: :id, type: :string]) do
       add :kind, :string, null: false
       add :algo, :string, null: false, default: "ed25519"
       add :public_key, :binary, null: false
@@ -30,6 +30,7 @@ defmodule Oktavarium.Repo.Migrations.CreateKeys do
 
       timestamps()
     end
+
     create index(:identity_auth_keys, [:key_id])
   end
 end

@@ -2,9 +2,8 @@ defmodule Oktavarium.Repo.Migrations.CreateGrants do
   use Ecto.Migration
 
   def change do
-    create table(:grants) do
-      add :identity_id, references(:identities, type: :string, on_delete: :restrict),
-        null: false
+    create table(:grants, primary_key: [name: :id, type: :string]) do
+      add :identity_id, references(:identities, type: :string, on_delete: :restrict), null: false
 
       add :issuer_key_id, references(:keys, type: :string, on_delete: :restrict), null: false
       add :subject_key_id, references(:keys, type: :string, on_delete: :restrict), null: false

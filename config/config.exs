@@ -15,7 +15,7 @@ config :oktavarium, OktavariumWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   url: [host: "localhost"],
   render_errors: [
-    formats: [html: OktavariumWeb.ErrorHtml, json: OktavariumWeb.ErrorJSON],
+    formats: [html: OktavariumWeb.ErrorHTML, json: OktavariumWeb.ErrorJSON],
     layout: false
   ]
 

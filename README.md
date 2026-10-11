@@ -83,10 +83,10 @@ Na produkcji (`MIX_ENV=prod`) wymagane są zmienne środowiskowe:
 | `PHX_HOST` | nazwa hosta (domyślnie `localhost`) |
 | `PORT` | port HTTP (domyślnie `4000`) |
 | `POOL_SIZE` | liczba połączeń z bazą (domyślnie `5`) |
-| `OKTAVARIUM_REGISTRACTION` | `open` albo `closed` (na produkcji domyślnie `closed`) |
+| `OKTAVARIUM_REGISTRATION` | `open` albo `closed` (na produkcji domyślnie `closed`) |
 
 ```sh
-export MIX_ENV=prod DATABASE_PATH=/var/lib/oktavarium/oktavarium.db SECRET_KEY_BASE=...
+export MIX_ENV=prod DATABASE_PATH=/var/lib/oktavarium/priv/oktavarium.db SECRET_KEY_BASE=...
 mix deps.get --only prod
 mix ecto.create && mix ecto.migrate
 mix phx.server

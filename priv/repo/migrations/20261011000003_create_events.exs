@@ -2,9 +2,8 @@ defmodule Oktavarium.Repo.Migrations.CreateEvents do
   use Ecto.Migration
 
   def change do
-    create table(:events) do
-      add :identity_id, references(:identities, type: :string, on_delete: :restrict),
-        null: false
+    create table(:events, primary_key: [name: :id, type: :string]) do
+      add :identity_id, references(:identities, type: :string, on_delete: :restrict), null: false
 
       add :seq, :integer, null: false
       add :prev, :string

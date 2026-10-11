@@ -2,7 +2,7 @@ defmodule Oktavarium.Repo.Migrations.CreateIdentities do
   use Ecto.Migration
 
   def change do
-    create table(:identities) do
+    create table(:identities, primary_key: [name: :id, type: :string]) do
       add :kind, :string, null: false
       add :handle, :string
       add :profile, :map, null: false, default: %{}

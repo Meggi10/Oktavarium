@@ -14,5 +14,5 @@ config :oktavarium, OktavariumWeb.Endpoint,
 config :logger, level: :warning
 
 config :oktavarium,
-  blob_dir: Path.join(System.tmp_dir!(), "atelier_test_blobs"),
+  blob_dir: Path.join(System.tmp_dir!(), "oktavarium_test_blobs"),
   sites_domain: "sites.test"
