@@ -1,6 +1,6 @@
 defmodule Oktavarium.Identities.Rules do
   @moduledoc false
-  @kinds [:user, :org, :project, :repo]
+  @kinds [:user, :bot, :org, :project]
 
   @doc "Dozwolone rodzaje tożsamości."
   @spec kinds() :: [atom()]

@@ -11,9 +11,7 @@ defmodule Oktavarium.Keys.Key do
     field :algo, :string, default: "ed25519"
     field :public_key, :binary
     field :status, Ecto.Enum, values: [:active, :revoked], default: :active
-
     belongs_to :home_identity, Oktavarium.Identities.Identity
-
     timestamps()
   end
 

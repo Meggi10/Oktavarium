@@ -5,7 +5,8 @@ defmodule Oktavarium.Replay do
   alias Oktavarium.{Log, Repo}
   alias Oktavarium.Grants.Grant
   alias Oktavarium.Identities.Identity
-  alias Oktavarium.Keys.{IdentityAuthKey, Key}
+  alias Oktavarium.Keys.{IdentityAuthKey, IdentitySigningKey, Key}
+  alias Oktavarium.Resources.Resource
   alias Oktavarium.Log.Event
 
   @tables [
@@ -14,6 +15,12 @@ defmodule Oktavarium.Replay do
     auth_links:
       {IdentityAuthKey, [:identity_id, :key_id, :status, :added_event_id],
        [:identity_id, :key_id]},
+    signing_members:
+      {IdentitySigningKey, [:identity_id, :key_id, :label, :status, :added_event_id],
+       [:identity_id, :key_id]},
+    resources:
+      {Resource, [:identity_id, :path, :kind, :hash, :size, :media_type, :meta, :event_id],
+       [:identity_id, :path]},
     grants:
       {Grant,
        [
@@ -113,7 +120,9 @@ defmodule Oktavarium.Replay do
 
   # Kolejność FK: granty (samoodwołanie), powiązania, zdarzenia, klucze, tożsamości.
   defp wipe do
-    for schema <- [Grant, IdentityAuthKey, Event, Key, Identity], do: Repo.delete_all(schema)
+    for schema <- [Resource, IdentitySigningKey, Grant, IdentityAuthKey, Event, Key, Identity],
+        do: Repo.delete_all(schema)
+
     :ok
   end
 

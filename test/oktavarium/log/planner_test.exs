@@ -438,8 +438,8 @@ defmodule Oktavarium.Log.PlannerTest do
     end
 
     test "nieobsługiwany typ zdarzenia", ctx do
-      {e, ev} = grant(ctx, %{}, type: "key.revoke")
-      assert {:error, {:unsupported_type, "key.revoke"}} = Planner.plan(e, ev, ctx.facts)
+      {e, ev} = grant(ctx, %{}, type: "repo.push")
+      assert {:error, {:unsupported_type, "repo.push"}} = Planner.plan(e, ev, ctx.facts)
     end
 
     test "powtórzone zdarzenie ma pierwszeństwo", ctx do

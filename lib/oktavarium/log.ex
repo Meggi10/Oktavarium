@@ -5,7 +5,8 @@ defmodule Oktavarium.Log do
   alias Oktavarium.{Crypto, Envelope, Repo}
   alias Oktavarium.Grants.Grant
   alias Oktavarium.Identities.Identity
-  alias Oktavarium.Keys.{IdentityAuthKey, Key}
+  alias Oktavarium.Keys.{IdentityAuthKey, IdentitySigningKey, Key}
+  alias Oktavarium.Resources.Resource
   alias Oktavarium.Log.{Event, Facts, Planner}
 
   @spec append(Envelope.t()) :: {:ok, Envelope.event()} | {:error, term()}
@@ -186,7 +187,64 @@ defmodule Oktavarium.Log do
       grants: grants_of(event.identity),
       now: now || DateTime.utc_now()
     }
+    |> type_facts(event)
   end
+
+  # Fakty potrzebne tylko niektórym typom zdarzeń.
+  defp type_facts(facts, %{type: type, body: body, identity: identity})
+       when type in ["key.add", "key.revoke"] do
+    key_id = body["key"]
+    %{facts | target_key: key_info(key_id), member: member_info(identity, key_id)}
+  end
+
+  defp type_facts(facts, %{type: type, body: body, identity: identity})
+       when type in ["auth_key.add", "auth_key.revoke"] do
+    key_id = body["key"]
+
+    member =
+      if is_binary(key_id),
+        do:
+          Repo.one(
+            from l in IdentityAuthKey,
+              where: l.identity_id == ^identity and l.key_id == ^key_id,
+              select: %{status: l.status}
+          )
+
+    count =
+      Repo.aggregate(
+        from(l in IdentityAuthKey, where: l.identity_id == ^identity and l.status == :active),
+        :count
+      )
+
+    %{facts | target_key: key_info(key_id), member: member, auth_count: count}
+  end
+
+  defp type_facts(facts, %{type: type, body: body, identity: identity})
+       when type in ["resource.put", "resource.delete"] do
+    %{facts | resource: resource_info(identity, body["path"])}
+  end
+
+  defp type_facts(facts, _event), do: facts
+
+  defp member_info(identity_id, key_id) when is_binary(key_id),
+    do:
+      Repo.one(
+        from m in IdentitySigningKey,
+          where: m.identity_id == ^identity_id and m.key_id == ^key_id,
+          select: %{status: m.status}
+      )
+
+  defp member_info(_identity_id, _key_id), do: nil
+
+  defp resource_info(identity_id, path) when is_binary(path),
+    do:
+      Repo.one(
+        from r in Resource,
+          where: r.identity_id == ^identity_id and r.path == ^path,
+          select: %{kind: r.kind, hash: r.hash}
+      )
+
+  defp resource_info(_identity_id, _path), do: nil
 
   defp grants_of(identity_id) do
     Repo.all(
@@ -273,6 +331,105 @@ defmodule Oktavarium.Log do
       {:ok, _identity} -> :ok
       {:error, changeset} -> Repo.rollback({:rejected, Identity, changeset_errors(changeset)})
     end
+  end
+
+  # Cofnięcie grantu: `at` pochodzi z plannera (czas przyjęcia zdarzenia), więc
+  # odtworzenie daje to samo `revoked_at`.
+  defp apply_op({:grant_revoke, %{id: id, at: at}}, _received_at) do
+    revoke_grants(from(g in Grant, where: g.id == ^id), at)
+  end
+
+  # Klucz logowania dopisany do tożsamości (albo ponownie włączony po cofnięciu).
+  defp apply_op({:auth_link_set, attrs}, at) do
+    case Repo.get_by(IdentityAuthKey, identity_id: attrs.identity_id, key_id: attrs.key_id) do
+      nil ->
+        insert!(IdentityAuthKey, attrs, at)
+
+      existing ->
+        changeset = existing |> IdentityAuthKey.changeset(attrs) |> stamp([:updated_at], at)
+
+        case Repo.update(changeset) do
+          {:ok, _} ->
+            :ok
+
+          {:error, changeset} ->
+            Repo.rollback({:rejected, IdentityAuthKey, changeset_errors(changeset)})
+        end
+    end
+  end
+
+  defp apply_op(
+         {:auth_link_revoke, %{identity_id: identity_id, key_id: key_id, at: at}},
+         _received_at
+       ) do
+    from(l in IdentityAuthKey, where: l.identity_id == ^identity_id and l.key_id == ^key_id)
+    |> Repo.update_all(
+      set: [status: :revoked, updated_at: NaiveDateTime.truncate(DateTime.to_naive(at), :second)]
+    )
+
+    :ok
+  end
+
+  # Członkostwo klucza sygnowania: dopisanie albo ponowne włączenie po cofnięciu.
+  defp apply_op({:member, attrs}, at) do
+    case Repo.get_by(IdentitySigningKey, identity_id: attrs.identity_id, key_id: attrs.key_id) do
+      nil ->
+        insert!(IdentitySigningKey, attrs, at)
+
+      existing ->
+        changeset = existing |> IdentitySigningKey.changeset(attrs) |> stamp([:updated_at], at)
+
+        case Repo.update(changeset) do
+          {:ok, _} ->
+            :ok
+
+          {:error, changeset} ->
+            Repo.rollback({:rejected, IdentitySigningKey, changeset_errors(changeset)})
+        end
+    end
+  end
+
+  # Cofnięcie członkostwa gasi też granty, którymi ten klucz dysponował w tej tożsamości.
+  defp apply_op(
+         {:member_revoke, %{identity_id: identity_id, key_id: key_id, at: at}},
+         _received_at
+       ) do
+    from(m in IdentitySigningKey, where: m.identity_id == ^identity_id and m.key_id == ^key_id)
+    |> Repo.update_all(
+      set: [status: :revoked, updated_at: NaiveDateTime.truncate(DateTime.to_naive(at), :second)]
+    )
+
+    revoke_grants(
+      from(g in Grant, where: g.identity_id == ^identity_id and g.subject_key_id == ^key_id),
+      at
+    )
+  end
+
+  defp apply_op({:resource, attrs}, at) do
+    case Repo.get_by(Resource, identity_id: attrs.identity_id, path: attrs.path) do
+      nil ->
+        insert!(Resource, attrs, at)
+
+      existing ->
+        changeset = existing |> Resource.changeset(attrs) |> stamp([:updated_at], at)
+
+        case Repo.update(changeset) do
+          {:ok, _} -> :ok
+          {:error, changeset} -> Repo.rollback({:rejected, Resource, changeset_errors(changeset)})
+        end
+    end
+  end
+
+  defp apply_op({:resource_delete, %{identity_id: identity_id, path: path}}, _at) do
+    Repo.delete_all(from r in Resource, where: r.identity_id == ^identity_id and r.path == ^path)
+    :ok
+  end
+
+  # Nie nadpisuje wcześniejszego cofnięcia.
+  defp revoke_grants(query, at) do
+    at = DateTime.truncate(at, :second)
+    Repo.update_all(from(g in query, where: is_nil(g.revoked_at)), set: [revoked_at: at])
+    :ok
   end
 
   defp insert!(schema, attrs, received_at) do

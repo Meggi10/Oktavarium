@@ -2,12 +2,26 @@ defmodule Oktavarium.Log.Planner do
   @moduledoc false
   alias Oktavarium.{Authz, Capability, Crypto, Envelope}
   alias Oktavarium.Identities.{Profile, Rules}
+  alias Oktavarium.Resources
   alias Oktavarium.Log.Facts
 
-  @supported_types ["grant.create", "profile.update"]
+  @supported_types ~w(grant.create grant.revoke profile.update key.add key.revoke auth_key.add auth_key.revoke
+                      resource.put resource.delete)
 
   @type op ::
-          {:identity | :key | :event | :auth_link | :grant | :profile, map()}
+          {:identity
+           | :key
+           | :event
+           | :auth_link
+           | :grant
+           | :profile
+           | :grant_revoke
+           | :auth_link_set
+           | :auth_link_revoke
+           | :member
+           | :member_revoke
+           | :resource
+           | :resource_delete, map()}
 
   @doc "Typy zdarzeń inne niż genesis, które planner potrafi obsłużyć."
   @spec supported_types() :: [String.t()]
@@ -224,6 +238,148 @@ defmodule Oktavarium.Log.Planner do
     end
   end
 
+  defp plan_type("grant.revoke", envelope, event, facts) do
+    with {:ok, grant_id} <- body_id(event.body, "grant"),
+         {:ok, grant} <- find(facts.grants, grant_id, :unknown_grant),
+         :ok <- check(is_nil(grant.revoked_at), :already_revoked),
+         :ok <- authorize_revoke(event, facts, grant) do
+      {:ok, [event_op(envelope, event), {:grant_revoke, %{id: grant.id, at: now(facts)}}]}
+    end
+  end
+
+  defp plan_type("key.add", envelope, event, facts) do
+    with {:ok, key_id} <- body_key(event.body, "key"),
+         {:ok, label} <- body_label(event.body),
+         :ok <- authorize(event, facts, "key.add", event.identity <> "/keys/" <> key_id),
+         :ok <- check(key_id != facts.founding_key_id, :already_member),
+         :ok <- check_member_target(key_id, facts.target_key),
+         :ok <-
+           check(
+             match?(%{status: :revoked}, facts.member) or is_nil(facts.member),
+             :already_member
+           ) do
+      {:ok, public} = Crypto.decode_key_id(key_id)
+
+      new_key =
+        if is_nil(facts.target_key),
+          do: [
+            {:key,
+             %{
+               id: key_id,
+               kind: :signing,
+               algo: "ed25519",
+               public_key: public,
+               status: :active,
+               home_identity_id: nil
+             }}
+          ],
+          else: []
+
+      {:ok,
+       new_key ++
+         [
+           event_op(envelope, event),
+           {:member,
+            %{
+              identity_id: event.identity,
+              key_id: key_id,
+              label: label,
+              status: :active,
+              added_event_id: event.id
+            }}
+         ]}
+    end
+  end
+
+  defp plan_type("auth_key.add", envelope, event, facts) do
+    with {:ok, key_id} <- body_key(event.body, "key"),
+         :ok <- authorize(event, facts, "auth_key.add", event.identity <> "/auth-keys/" <> key_id),
+         :ok <- check_auth_target(key_id, facts.target_key),
+         :ok <- check(not match?(%{status: :active}, facts.member), :already_member) do
+      {:ok, public} = Crypto.decode_key_id(key_id)
+
+      new_key =
+        if is_nil(facts.target_key),
+          do: [
+            {:key,
+             %{id: key_id, kind: :auth, algo: "ed25519", public_key: public, status: :active}}
+          ],
+          else: []
+
+      {:ok,
+       new_key ++
+         [
+           event_op(envelope, event),
+           {:auth_link_set,
+            %{
+              identity_id: event.identity,
+              key_id: key_id,
+              status: :active,
+              added_event_id: event.id
+            }}
+         ]}
+    end
+  end
+
+  defp plan_type("auth_key.revoke", envelope, event, facts) do
+    with {:ok, key_id} <- body_key(event.body, "key"),
+         :ok <-
+           authorize(event, facts, "auth_key.revoke", event.identity <> "/auth-keys/" <> key_id),
+         :ok <- check(match?(%{status: :active}, facts.member), :not_a_member),
+         :ok <- check(facts.auth_count > 1, :last_auth_key) do
+      {:ok,
+       [
+         event_op(envelope, event),
+         {:auth_link_revoke, %{identity_id: event.identity, key_id: key_id, at: now(facts)}}
+       ]}
+    end
+  end
+
+  defp plan_type("key.revoke", envelope, event, facts) do
+    with {:ok, key_id} <- body_key(event.body, "key"),
+         :ok <- authorize(event, facts, "key.revoke", event.identity <> "/keys/" <> key_id),
+         :ok <- check(key_id != facts.founding_key_id, :cannot_revoke_founding_key),
+         :ok <- check(match?(%{status: :active}, facts.member), :not_a_member) do
+      {:ok,
+       [
+         event_op(envelope, event),
+         {:member_revoke, %{identity_id: event.identity, key_id: key_id, at: now(facts)}}
+       ]}
+    end
+  end
+
+  defp plan_type("resource.put", envelope, event, facts) do
+    with {:ok, put} <- Resources.parse_put(event.body),
+         :ok <-
+           authorize(
+             event,
+             facts,
+             Resources.put_action(),
+             Resources.resource(event.identity, put.path)
+           ) do
+      {:ok,
+       [
+         event_op(envelope, event),
+         {:resource, Map.merge(put, %{identity_id: event.identity, event_id: event.id})}
+       ]}
+    end
+  end
+
+  defp plan_type("resource.delete", envelope, event, facts) do
+    with {:ok, path} <- Resources.parse_delete(event.body),
+         :ok <-
+           authorize(
+             event,
+             facts,
+             Resources.delete_action(),
+             Resources.resource(event.identity, path)
+           ),
+         :ok <- check(not is_nil(facts.resource), :unknown_resource) do
+      {:ok,
+       [event_op(envelope, event), {:resource_delete, %{identity_id: event.identity, path: path}}]}
+    end
+  end
+
   # Każde zmieniane pole to osobny zasób, więc delegat z grantem na `<id>/profile/bio`
   # nie zmieni `display_name`. Błąd wskazuje pierwsze (alfabetycznie) niedozwolone pole.
   defp authorize_profile(changes, event, facts) do
@@ -247,6 +403,81 @@ defmodule Oktavarium.Log.Planner do
       end
     end)
   end
+
+  defp check_auth_target(_id, nil), do: :ok
+  defp check_auth_target(id, %{kind: :signing}), do: {:error, {:key_kind_conflict, id}}
+  defp check_auth_target(id, %{status: :revoked}), do: {:error, {:key_revoked, id}}
+  defp check_auth_target(_id, _info), do: :ok
+
+  # Grant cofa jego wystawca, klucz założycielski albo ktoś z capability `grant.revoke`.
+  defp authorize_revoke(event, facts, grant) do
+    if event.signer in [facts.founding_key_id, grant.issuer_key_id],
+      do: :ok,
+      else: authorize(event, facts, "grant.revoke", event.identity <> "/grants/" <> grant.id)
+  end
+
+  defp authorize(event, facts, action, resource) do
+    if Authz.permits?(
+         facts.grants,
+         facts.founding_key_id,
+         event.signer,
+         action,
+         resource,
+         now(facts)
+       ),
+       do: :ok,
+       else: {:error, :not_authorized}
+  end
+
+  defp now(facts), do: (facts.now || DateTime.utc_now()) |> DateTime.truncate(:second)
+
+  defp find(grants, id, error) do
+    case Enum.find(grants, &(&1.id == id)) do
+      nil -> {:error, error}
+      grant -> {:ok, grant}
+    end
+  end
+
+  defp body_id(body, field) do
+    with id when is_binary(id) <- Map.get(body, field),
+         {:ok, <<_::binary-size(32)>>} <- Crypto.decode(id) do
+      {:ok, id}
+    else
+      _ -> {:error, {:invalid_body, field}}
+    end
+  end
+
+  defp body_key(body, field) do
+    with id when is_binary(id) <- Map.get(body, field),
+         {:ok, _public} <- Crypto.decode_key_id(id) do
+      {:ok, id}
+    else
+      _ -> {:error, {:invalid_body, field}}
+    end
+  end
+
+  defp body_label(body) do
+    case Map.get(body, "label") do
+      nil ->
+        {:ok, nil}
+
+      label when is_binary(label) ->
+        if valid_label?(label), do: {:ok, label}, else: {:error, {:invalid_body, "label"}}
+
+      _other ->
+        {:error, {:invalid_body, "label"}}
+    end
+  end
+
+  defp valid_label?(label),
+    do:
+      label != "" and String.valid?(label) and String.length(label) <= 40 and
+        not Regex.match?(~r/[\x00-\x1F\x7F\x{0085}]/u, label)
+
+  defp check_member_target(_id, nil), do: :ok
+  defp check_member_target(id, %{kind: :auth}), do: {:error, {:key_kind_conflict, id}}
+  defp check_member_target(id, %{status: :revoked}), do: {:error, {:key_revoked, id}}
+  defp check_member_target(_id, _info), do: :ok
 
   defp grant_subject(%{"subject" => subject}) when is_binary(subject) do
     case Crypto.decode_key_id(subject) do

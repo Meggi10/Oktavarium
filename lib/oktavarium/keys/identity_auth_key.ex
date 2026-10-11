@@ -9,10 +9,8 @@ defmodule Oktavarium.Keys.IdentityAuthKey do
   schema "identity_auth_keys" do
     belongs_to :identity, Oktavarium.Identities.Identity, primary_key: true
     belongs_to :key, Oktavarium.Keys.Key, primary_key: true
-
     field :status, Ecto.Enum, values: [:active, :revoked], default: :active
     field :added_event_id, :string
-
     timestamps()
   end
 

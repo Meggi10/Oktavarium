@@ -5,7 +5,8 @@ defmodule Oktavarium.Directory do
   alias Oktavarium.{Authz, Delegation, Envelope, Repo}
   alias Oktavarium.Grants.Grant
   alias Oktavarium.Identities.Identity
-  alias Oktavarium.Keys.{IdentityAuthKey, Key}
+  alias Oktavarium.Keys.{IdentityAuthKey, IdentitySigningKey, Key}
+  alias Oktavarium.Resources.Resource
   alias Oktavarium.Log.Event
 
   @type grant_status :: :active | :revoked | :expired | :pending | :broken
@@ -62,6 +63,106 @@ defmodule Oktavarium.Directory do
         where: i.visibility == ^:public and (i.handle == ^ref or i.id == ^ref)
     )
   end
+
+  # zasoby
+
+  @doc """
+  Zasoby tożsamości (`:image`, `:audio`, `:site` albo wszystkie), posortowane po
+  rodzaju i ścieżce. Każdy jako mapa z polami wpisu.
+  """
+  @spec resources(%Identity{}, atom() | nil) :: [map()]
+  def resources(%Identity{id: id}, kind \\ nil) do
+    query =
+      from r in Resource,
+        where: r.identity_id == ^id,
+        order_by: [asc: r.kind, asc: r.path],
+        select: map(r, [:path, :kind, :hash, :size, :media_type, :meta, :updated_at])
+
+    query = if kind, do: where(query, [r], r.kind == ^kind), else: query
+    Repo.all(query)
+  end
+
+  @doc """
+  Najnowsze zasoby danego rodzaju ze wszystkich **publicznych** tożsamości (galeria na
+  stronie głównej). Opcja `:limit` (domyślnie 48). Każdy wpis niesie też
+  tożsamość, do której należy.
+  """
+  @spec gallery(:image | :audio, keyword()) :: [map()]
+  def gallery(kind, opts \\ []) when kind in [:image, :audio] do
+    Repo.all(
+      from r in Resource,
+        join: i in Identity,
+        on: i.id == r.identity_id,
+        where: r.kind == ^kind and i.visibility == ^:public,
+        order_by: [desc: r.updated_at, desc: r.inserted_at, asc: r.path],
+        limit: ^Keyword.get(opts, :limit, 48),
+        select: %{
+          path: r.path,
+          hash: r.hash,
+          media_type: r.media_type,
+          meta: r.meta,
+          at: r.updated_at,
+          identity_id: i.id,
+          handle: i.handle,
+          profile: i.profile
+        }
+    )
+  end
+
+  @doc "Klucze sygnowania dopisane do tożsamości zdarzeniem `key.add` (bez klucza założycielskiego)."
+  @spec members(%Identity{}) :: [map()]
+  def members(%Identity{id: id}) do
+    Repo.all(
+      from m in IdentitySigningKey,
+        where: m.identity_id == ^id,
+        order_by: [asc: m.inserted_at, asc: m.key_id],
+        select: %{key_id: m.key_id, label: m.label, status: m.status}
+    )
+  end
+
+  @doc """
+  Plik strony tożsamości o uchwycie `handle`: ścieżka względna do `site/`
+  (`"index.html"`, `"css/a.css"`). `{:ok, %{hash, media_type, size}}` albo `:error`.
+  Tylko tożsamości publiczne.
+  """
+  @spec site_file(String.t(), String.t()) :: {:ok, map()} | :error
+  def site_file(handle, relative) when is_binary(handle) and is_binary(relative) do
+    row =
+      Repo.one(
+        from r in Resource,
+          join: i in Identity,
+          on: i.id == r.identity_id,
+          where:
+            i.handle == ^handle and i.visibility == ^:public and r.kind == ^:site and
+              r.path == ^("site/" <> relative),
+          select: %{hash: r.hash, media_type: r.media_type, size: r.size}
+      )
+
+    if row, do: {:ok, row}, else: :error
+  end
+
+  @doc "Czy tożsamość ma stronę (plik `site/index.html`)."
+  def has_site?(%Identity{id: id}),
+    do:
+      Repo.exists?(
+        from r in Resource, where: r.identity_id == ^id and r.path == "site/index.html"
+      )
+
+  @doc "Blob dostępny publicznie: `hash` użyty przez zasób obrazu albo audio publicznej tożsamości."
+  @spec public_media(String.t()) :: map() | nil
+  def public_media(hash) do
+    Repo.one(
+      from r in Resource,
+        join: i in Identity,
+        on: i.id == r.identity_id,
+        where: r.hash == ^hash and r.kind in [:image, :audio] and i.visibility == ^:public,
+        limit: 1,
+        select: %{hash: r.hash, media_type: r.media_type, size: r.size}
+    )
+  end
+
+  @doc "Czy tożsamość o `id` istnieje (także niepubliczna); do API zalogowanych."
+  def identity_exists?(id), do: Repo.exists?(from i in Identity, where: i.id == ^id)
 
   @doc "Id klucza założycielskiego (podpisał genesis)."
   @spec founding_key_id(%Identity{}) :: String.t() | nil

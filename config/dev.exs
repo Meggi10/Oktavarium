@@ -8,7 +8,10 @@ config :oktavarium, Oktavarium.Repo,
 
 config :oktavarium, OktavariumWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4000],
-  secret_key_base: "dev-only-secret-key-base-dev-only-secret-key-base-dev-only-secret-key-base-0000",
-	debug_errors: true
+  secret_key_base:
+    "dev-only-secret-key-base-dev-only-secret-key-base-dev-only-secret-key-base-0000",
+  debug_errors: true
 
 config :logger, :default_formatter, format: "[$level] $message\n"
+
+config :oktavarium, blob_dir: Path.expand("../priv/blobs_dev", __DIR__), sites_domain: "localhost"

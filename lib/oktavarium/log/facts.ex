@@ -12,6 +12,10 @@ defmodule Oktavarium.Log.Facts do
           founding_key_id: String.t() | nil,
           subject_key: key_info() | nil,
           grants: [map()],
+          target_key: key_info() | nil,
+          member: %{status: :active | :revoked} | nil,
+          resource: map() | nil,
+          auth_count: non_neg_integer(),
           now: DateTime.t() | nil
         }
 
@@ -24,5 +28,9 @@ defmodule Oktavarium.Log.Facts do
             founding_key_id: nil,
             subject_key: nil,
             grants: [],
+            target_key: nil,
+            member: nil,
+            resource: nil,
+            auth_count: 0,
             now: nil
 end
