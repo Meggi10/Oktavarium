@@ -46,6 +46,7 @@ defmodule OktavariumWeb.Router do
     post "/session/challenge", SessionController, :challenge
     post "/session", SessionController, :create
     get "/me", SessionController, :me
+    get "/identities", IdentityApiController, :index
     get "/identities/:ref", IdentityApiController, :show
     get "/identities/:id/head", EventController, :head
     get "/identities/:id/events", EventController, :index

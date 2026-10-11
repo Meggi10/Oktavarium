@@ -5,7 +5,7 @@ defmodule Oktavarium.Log.Planner do
   alias Oktavarium.Resources
   alias Oktavarium.Log.Facts
 
-  @supported_types ~w(grant.create grant.revoke profile.update key.add key.revoke auth_key.add auth_key.revoke
+  @supported_types ~w(grant.create grant.revoke profile.update identity.visibility.set key.add key.revoke auth_key.add auth_key.revoke
                       resource.put resource.delete)
 
   @type op ::
@@ -15,6 +15,7 @@ defmodule Oktavarium.Log.Planner do
            | :auth_link
            | :grant
            | :profile
+           | :visibility
            | :grant_revoke
            | :auth_link_set
            | :auth_link_revoke
@@ -38,7 +39,9 @@ defmodule Oktavarium.Log.Planner do
   # genesis
 
   defp plan_genesis(envelope, event, facts) do
-    with {:ok, kind} <- genesis_kind(event.body),
+    with :ok <- genesis_fields(event.body),
+         {:ok, kind} <- genesis_kind(event.body),
+         {:ok, visibility} <- genesis_visibility(event.body),
          {:ok, handle} <- genesis_handle(event.body),
          {:ok, auth_keys} <- genesis_auth_keys(event.body),
          :ok <- check(is_nil(facts.signer_key), :signing_key_already_registered),
@@ -76,8 +79,7 @@ defmodule Oktavarium.Log.Planner do
             kind: kind,
             handle: handle,
             profile: %{},
-            visibility: :public,
-            parent_id: nil
+            visibility: visibility
           }},
          {:key,
           %{
@@ -91,6 +93,24 @@ defmodule Oktavarium.Log.Planner do
        ] ++ new_auth_keys ++ [event_op(envelope, event)] ++ links}
     end
   end
+
+  defp genesis_fields(body) do
+    allowed = ~w(kind handle auth_keys visibility)
+
+    case body |> Map.keys() |> Enum.sort() |> Enum.find(&(&1 not in allowed)) do
+      nil -> :ok
+      field -> {:error, {:invalid_body, field}}
+    end
+  end
+
+  defp genesis_visibility(%{"visibility" => visibility}) do
+    case Rules.parse_visibility(visibility) do
+      {:ok, value} -> {:ok, value}
+      :error -> {:error, {:invalid_body, "visibility"}}
+    end
+  end
+
+  defp genesis_visibility(_body), do: {:ok, :public}
 
   defp genesis_kind(%{"kind" => kind}) when is_binary(kind) do
     case Rules.parse_kind(kind) do
@@ -221,6 +241,24 @@ defmodule Oktavarium.Log.Planner do
             expires_at: expires_at,
             delegable: delegable
           }}
+       ]}
+    end
+  end
+
+  defp plan_type("identity.visibility.set", envelope, event, facts) do
+    with {:ok, visibility} <- genesis_visibility(event.body),
+         :ok <- check(Map.keys(event.body) == ["visibility"], {:invalid_body, "visibility"}),
+         :ok <-
+           authorize(
+             event,
+             facts,
+             "identity.visibility.set",
+             event.identity <> "/settings/visibility"
+           ) do
+      {:ok,
+       [
+         event_op(envelope, event),
+         {:visibility, %{identity_id: event.identity, visibility: visibility}}
        ]}
     end
   end

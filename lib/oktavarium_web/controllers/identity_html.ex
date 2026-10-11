@@ -14,195 +14,245 @@ defmodule OktavariumWeb.IdentityHTML do
       assigns
       |> Map.put(:profile, assigns.identity.profile || %{})
       |> Map.put(:ref, assigns.identity.handle || assigns.identity.id)
+      |> Map.put(:images, images(assigns.resources))
+      |> Map.put(:tracks, tracks(assigns.resources))
+      |> Map.put(:site_files, site_files(assigns.resources))
 
     ~H"""
-    <article class="sheet">
-      <header class="id-head">
-        <h1>{name(@identity)}</h1>
-        <p class="sub">
-          <span :if={@identity.handle} class="handle">@{@identity.handle}</span>
-          <span class="kind">{kind_name(@identity.kind)}</span>
-        </p>
-        <p :if={@profile["bio"]} class="bio">{@profile["bio"]}</p>
-        <p :if={profile_empty?(@profile)} class="muted">Ta tożsamość nie ma jeszcze opisu.</p>
-        <dl :if={@profile["location"] || @profile["website"]} class="facts">
-          <div :if={@profile["location"]}>
-            <dt>Miejsce</dt>
-            <dd>{@profile["location"]}</dd>
-          </div>
-          <div :if={@profile["website"]}>
-            <dt>Strona</dt>
-            <dd>
-              <a
-                :if={web_url?(@profile["website"])}
-                href={@profile["website"]}
-                rel="nofollow noopener noreferrer ugc"
-              >
-                {@profile["website"]}
-              </a>
-              <span :if={!web_url?(@profile["website"])}>{@profile["website"]}</span>
-            </dd>
-          </div>
-        </dl>
+    <article class="profile-page">
+      <a class="back-link" href={~p"/"}><span aria-hidden="true">←</span> Odkrywaj</a>
+      <header class="profile-header">
+        <span class="avatar avatar-large" data-kind={@identity.kind} aria-hidden="true">{initial(
+          @identity
+        )}</span>
+        <div class="profile-copy">
+          <p class="eyebrow">{public_kind(@identity.kind)}</p>
+          <h1>{name(@identity)}</h1>
+          <p :if={@identity.handle} class="profile-handle">@{@identity.handle}</p>
+          <p :if={@profile["bio"]} class="bio">{@profile["bio"]}</p>
+          <p :if={profile_empty?(@profile)} class="muted">Ta tożsamość nie ma jeszcze opisu.</p>
+          <dl :if={@profile["location"] || @profile["website"]} class="facts">
+            <div :if={@profile["location"]}>
+              <dt>Miejsce</dt>
+              <dd>{@profile["location"]}</dd>
+            </div>
+            <div :if={@profile["website"]}>
+              <dt>Strona</dt>
+              <dd>
+                <a
+                  :if={web_url?(@profile["website"])}
+                  href={@profile["website"]}
+                  rel="nofollow noopener noreferrer ugc"
+                >{@profile["website"]}</a>
+                <span :if={!web_url?(@profile["website"])}>{@profile["website"]}</span>
+              </dd>
+            </div>
+          </dl>
+        </div>
+        <div :if={@site_url} class="profile-actions">
+          <a class="btn" href={@site_url} target="_blank" rel="noopener noreferrer">
+            Własna strona <span aria-hidden="true">↗</span>
+            <span class="sr">(otwiera się w nowej karcie)</span>
+          </a>
+        </div>
       </header>
 
-      <aside class="title-block" aria-label="Dane tożsamości">
-        <dl>
-          <div>
-            <dt>Rodzaj</dt>
-            <dd>{kind_name(@identity.kind)}</dd>
-          </div>
-          <div>
-            <dt>Założono</dt>
-            <dd><.time_tag at={@identity.inserted_at} /></dd>
-          </div>
-          <div>
-            <dt>Identyfikator</dt>
-            <dd class="full-id">{@identity.id}</dd>
-          </div>
-          <div :if={@founding_key}>
-            <dt>Klucz założycielski</dt>
-            <dd><.key_id id={@founding_key} /></dd>
-          </div>
-          <div>
-            <dt>Klucze autoryzacji</dt>
-            <dd>
-              <span :for={k <- @auth_keys} class="auth-key">
-                <.key_id id={k.key_id} />
-                <span :if={k.status == :revoked} class="tag bad">unieważniony</span>
-              </span>
-            </dd>
-          </div>
-          <div>
-            <dt>Zdarzenia</dt>
-            <dd>{@event_count}</dd>
-          </div>
-          <div :if={@integrity == :ok} class="integrity ok">
-            <dt>Dziennik</dt>
-            <dd>
-              Zweryfikowany: podpisy i łańcuch zdarzeń się zgadzają.
-              <a href={~p"/api/identities/#{@identity.id}/events"}>Pobierz JSON</a>
-            </dd>
-          </div>
-          <div :if={@integrity != :ok} class="integrity bad" role="alert">
-            <dt>Dziennik</dt>
-            <dd>{integrity_text(@integrity)}</dd>
-          </div>
-        </dl>
-      </aside>
+      <p :if={@integrity != :ok} class="notice bad" role="alert">{integrity_text(@integrity)}</p>
 
-      <div class="id-rest">
-        <section :if={@resources != []} aria-labelledby="res-h" class="resources-section">
-          <h2 id="res-h">Zasoby</h2>
-          <p :if={@site_url} class="section-note">
-            Ta tożsamość ma własną stronę: <a href={@site_url} rel="noopener">{@site_url}</a>
-          </p>
-          <ul :if={images(@resources) != []} class="gallery">
-            <li :for={r <- images(@resources)}>
-              <figure>
+      <section id="resources" aria-labelledby="res-h" class="resources-section profile-resources">
+        <div class="section-heading">
+          <h2 id="res-h">Publikacje</h2>
+          <span class="section-note">Zasoby tej przestrzeni</span>
+        </div>
+        <div :if={@images == [] && @tracks == [] && @site_files == []} class="feed-empty">
+          <h3>Jeszcze nic tu nie opublikowano</h3>
+          <p>Obrazy, nagrania i własna strona pojawią się w tym miejscu.</p>
+        </div>
+        <ul :if={@images != []} class="gallery" aria-label="Obrazy">
+          <li :for={r <- @images}>
+            <figure>
+              <a
+                class="media-link"
+                href={~p"/blobs/#{r.hash}"}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={"Otwórz obraz: " <> (r.meta["title"] || r.path) <> " (nowa karta)"}
+              >
                 <img
                   src={~p"/blobs/#{r.hash}"}
-                  alt={r.meta["alt"] || r.meta["title"] || ""}
+                  alt={r.meta["alt"] || r.meta["title"] || r.path}
                   loading="lazy"
                   decoding="async"
                 />
-                <figcaption>
-                  <span class="cap-title">{r.meta["title"] || r.path}</span>
-                </figcaption>
-              </figure>
-            </li>
-          </ul>
-          <ul :if={tracks(@resources) != []} class="tracks">
-            <li :for={r <- tracks(@resources)}>
-              <div class="track-head"><span class="cap-title">{r.meta["title"] || r.path}</span></div>
-              <audio controls preload="none" src={~p"/blobs/#{r.hash}"}></audio>
-            </li>
-          </ul>
-          <p :if={site_files(@resources) != []} class="muted">
-            {plural(length(site_files(@resources)), "plik strony", "pliki strony", "plików strony")}
-          </p>
-        </section>
-
-        <section :if={@members != []} aria-labelledby="members-h" class="members-section">
-          <h2 id="members-h">Klucze urządzeń</h2>
-          <p class="section-note">
-            Klucze dopisane do tej tożsamości. Same niczego nie mogą: uprawnienia dają granty.
-          </p>
-          <ul class="members">
-            <li :for={m <- @members}>
-              <.key_id id={m.key_id} />
-              <span :if={m.label} class="muted">{m.label}</span>
-              <span :if={m.status == :revoked} class="tag bad">cofnięty</span>
-            </li>
-          </ul>
-        </section>
-
-        <section aria-labelledby="grants-h" class="grants-section">
-          <h2 id="grants-h">Uprawnienia</h2>
-          <p class="section-note">
-            Klucz założycielski może wszystko w tej przestrzeni. Poniżej to, co nadał innym kluczom.
-          </p>
-          <p :if={@grants == []} class="muted">Nikomu nie nadano uprawnień.</p>
-          <table :if={@grants != []} class="grants">
-            <caption class="sr">Uprawnienia nadane innym kluczom</caption>
-            <thead>
-              <tr>
-                <th scope="col">Komu</th>
-                <th scope="col">Co może</th>
-                <th scope="col">Gdzie</th>
-                <th scope="col">Kiedy</th>
-                <th scope="col">Stan</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={g <- @grants} class={["grant", "is-#{g.status}"]}>
-                <td data-label="Komu">
-                  <.holder key_id={g.subject_key_id} homes={@homes} />
-                  <span :if={g.delegable} class="tag">może przekazywać dalej</span>
-                </td>
-                <td data-label="Co może"><code class="cap">{g.action}</code></td>
-                <td data-label="Gdzie">
-                  <code class="cap" title={g.resource}>{relative(g.resource, @identity.id)}</code>
-                </td>
-                <td data-label="Kiedy">{window_text(g.not_before, g.expires_at)}</td>
-                <td data-label="Stan">
-                  <span class={["status", "is-#{g.status}"]}>{status_label(g.status)}</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
-        <section aria-labelledby="log-h" class="log-section">
-          <h2 id="log-h">Dziennik</h2>
-          <p class="section-note">
-            Najnowsze zdarzenia są na górze. Każde jest podpisane i wskazuje poprzednie.
-          </p>
-          <p :if={@before} class="section-note">
-            <a href={~p"/i/#{@ref}"}>Wróć do najnowszych zdarzeń</a>
-          </p>
-          <ol class={["log", @next_before && "continues"]}>
-            <li
-              :for={e <- @entries}
-              class={["event", e.seq == 0 && "is-genesis", e[:corrupt] && "is-corrupt"]}
+              </a>
+              <figcaption>
+                <span class="cap-title">{r.meta["title"] || r.path}</span>
+                <p :if={r.meta["description"]} class="media-description">{r.meta["description"]}</p>
+              </figcaption>
+            </figure>
+          </li>
+        </ul>
+        <ul :if={@tracks != []} class="tracks" aria-label="Nagrania">
+          <li :for={r <- @tracks}>
+            <div class="track-head"><span class="cap-title">{r.meta["title"] || r.path}</span></div>
+            <audio
+              controls
+              preload="none"
+              src={~p"/blobs/#{r.hash}"}
+              aria-label={"Odtwórz: " <> (r.meta["title"] || r.path)}
             >
-              <div class="ev-head">
-                <span class="ev-seq">#{e.seq}</span>
-                <h3 class="ev-title">{event_title(e)}</h3>
-                <.time_tag at={e.received_at} />
-              </div>
-              <.event_body e={e} identity_id={@identity.id} homes={@homes} />
-              <p class="ev-meta">
-                Podpisał <.holder key_id={e.signer} homes={@homes} />
-                <code class="hash" title={e.id}>{short(e.id)}</code>
-              </p>
-            </li>
-          </ol>
-          <p :if={@next_before} class="older">
-            <a href={~p"/i/#{@ref}?#{[before: @next_before]}"}>Starsze zdarzenia</a>
-          </p>
+              <a href={~p"/blobs/#{r.hash}"}>Pobierz nagranie</a>
+            </audio>
+          </li>
+        </ul>
+        <section :if={@site_files != []} class="site-card" aria-labelledby="site-h">
+          <div>
+            <p class="eyebrow">Własna przestrzeń</p>
+            <h3 id="site-h">Strona internetowa</h3>
+            <p>{plural(length(@site_files), "plik strony", "pliki strony", "plików strony")}</p>
+            <p :if={!@site_url} class="muted">Podgląd strony nie jest jeszcze dostępny.</p>
+          </div>
+          <a :if={@site_url} class="btn" href={@site_url} target="_blank" rel="noopener noreferrer">
+            Otwórz stronę <span aria-hidden="true">↗</span>
+            <span class="sr">(otwiera się w nowej karcie)</span>
+          </a>
         </section>
-      </div>
+      </section>
+
+      <details id="profile-details" class="technical" open={@before != nil || @integrity != :ok}>
+        <summary>
+          <span>Historia i szczegóły techniczne</span>
+          <span class="technical-caption">Dziennik, klucze i uprawnienia</span>
+        </summary>
+        <div class="technical-grid">
+          <aside class="title-block" aria-label="Dane tożsamości">
+            <dl>
+              <div>
+                <dt>Rodzaj</dt>
+                <dd>{kind_name(@identity.kind)}</dd>
+              </div>
+              <div>
+                <dt>Założono</dt>
+                <dd><.time_tag at={@identity.inserted_at} /></dd>
+              </div>
+              <div>
+                <dt>Identyfikator</dt>
+                <dd class="full-id">{@identity.id}</dd>
+              </div>
+              <div :if={@founding_key}>
+                <dt>Klucz założycielski</dt>
+                <dd><.key_id id={@founding_key} /></dd>
+              </div>
+              <div>
+                <dt>Klucze autoryzacji</dt>
+                <dd>
+                  <span :for={k <- @auth_keys} class="auth-key">
+                    <.key_id id={k.key_id} />
+                    <span :if={k.status == :revoked} class="tag bad">unieważniony</span>
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt>Zdarzenia</dt>
+                <dd>{@event_count}</dd>
+              </div>
+              <div :if={@integrity == :ok} class="integrity ok">
+                <dt>Dziennik</dt>
+                <dd>
+                  Zweryfikowany: podpisy i łańcuch zdarzeń się zgadzają.
+                  <a href={~p"/api/identities/#{@identity.id}/events"}>Pobierz JSON</a>
+                </dd>
+              </div>
+              <div :if={@integrity != :ok} class="integrity bad">
+                <dt>Dziennik</dt>
+                <dd>{integrity_text(@integrity)}</dd>
+              </div>
+            </dl>
+          </aside>
+
+          <div class="id-rest">
+            <section :if={@members != []} aria-labelledby="members-h" class="members-section">
+              <h2 id="members-h">Klucze urządzeń</h2>
+              <p class="section-note">
+                Klucze dopisane do tej tożsamości. Same niczego nie mogą: uprawnienia dają granty.
+              </p>
+              <ul class="members">
+                <li :for={m <- @members}>
+                  <.key_id id={m.key_id} />
+                  <span :if={m.label} class="muted">{m.label}</span>
+                  <span :if={m.status == :revoked} class="tag bad">cofnięty</span>
+                </li>
+              </ul>
+            </section>
+
+            <section aria-labelledby="grants-h" class="grants-section">
+              <h2 id="grants-h">Uprawnienia</h2>
+              <p class="section-note">
+                Klucz założycielski może wszystko w tej przestrzeni. Poniżej to, co nadał innym kluczom.
+              </p>
+              <p :if={@grants == []} class="muted">Nikomu nie nadano uprawnień.</p>
+              <table :if={@grants != []} class="grants">
+                <caption class="sr">Uprawnienia nadane innym kluczom</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Komu</th>
+                    <th scope="col">Co może</th>
+                    <th scope="col">Gdzie</th>
+                    <th scope="col">Kiedy</th>
+                    <th scope="col">Stan</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={g <- @grants} class={["grant", "is-#{g.status}"]}>
+                    <td data-label="Komu">
+                      <.holder key_id={g.subject_key_id} homes={@homes} />
+                      <span :if={g.delegable} class="tag">może przekazywać dalej</span>
+                    </td>
+                    <td data-label="Co może"><code class="cap">{g.action}</code></td>
+                    <td data-label="Gdzie">
+                      <code class="cap" title={g.resource}>{relative(g.resource, @identity.id)}</code>
+                    </td>
+                    <td data-label="Kiedy">{window_text(g.not_before, g.expires_at)}</td>
+                    <td data-label="Stan">
+                      <span class={["status", "is-#{g.status}"]}>{status_label(g.status)}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section aria-labelledby="log-h" class="log-section">
+              <h2 id="log-h">Dziennik</h2>
+              <p class="section-note">
+                Najnowsze zdarzenia są na górze. Każde jest podpisane i wskazuje poprzednie.
+              </p>
+              <p :if={@before} class="section-note">
+                <a href={~p"/i/#{@ref}"}>Wróć do najnowszych zdarzeń</a>
+              </p>
+              <ol class={["log", @next_before && "continues"]}>
+                <li
+                  :for={e <- @entries}
+                  class={["event", e.seq == 0 && "is-genesis", e[:corrupt] && "is-corrupt"]}
+                >
+                  <div class="ev-head">
+                    <span class="ev-seq">#{e.seq}</span>
+                    <h3 class="ev-title">{event_title(e)}</h3>
+                    <.time_tag at={e.received_at} />
+                  </div>
+                  <.event_body e={e} identity_id={@identity.id} homes={@homes} />
+                  <p class="ev-meta">
+                    Podpisał <.holder key_id={e.signer} homes={@homes} />
+                    <code class="hash" title={e.id}>{short(e.id)}</code>
+                  </p>
+                </li>
+              </ol>
+              <p :if={@next_before} class="older">
+                <a href={~p"/i/#{@ref}?#{[before: @next_before]}"}>Starsze zdarzenia</a>
+              </p>
+            </section>
+          </div>
+        </div>
+      </details>
     </article>
     """
   end
@@ -336,6 +386,21 @@ defmodule OktavariumWeb.IdentityHTML do
   defp event_title(%{type: type}), do: "Zdarzenie " <> type
 
   # pomocnicze
+
+  defp public_kind(:user), do: "osoba"
+  defp public_kind(:org), do: "kolektyw"
+  defp public_kind(kind), do: kind_name(kind)
+
+  defp initial(identity) do
+    identity
+    |> name()
+    |> String.trim()
+    |> String.first()
+    |> case do
+      nil -> "O"
+      char -> String.upcase(char)
+    end
+  end
 
   defp images(resources), do: Enum.filter(resources, &(&1.kind == :image))
   defp tracks(resources), do: Enum.filter(resources, &(&1.kind == :audio))

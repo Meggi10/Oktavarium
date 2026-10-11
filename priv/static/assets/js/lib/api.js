@@ -63,6 +63,7 @@ export async function api(method, path, { json, raw, type, headers = {} } = {}) 
 }
 
 export const me = () => api("GET", "/api/me");
+export const identities = async () => (await api("GET", "/api/identities")).identities;
 export const identity = (ref) => api("GET", "/api/identities/" + encodeURIComponent(ref));
 
 /** Logowanie podpisem klucza autoryzacji (`key` ze skarbca). */

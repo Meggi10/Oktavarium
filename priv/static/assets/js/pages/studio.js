@@ -8,7 +8,7 @@ import { h, mount, field, notice, download, confirmSign } from "../lib/ui.js";
 
 const root = document.getElementById("app");
 
-const state = { me: null, vault: null, current: null, data: null, signerId: null, message: null, busy: false };
+const state = { me: null, vault: null, current: null, data: null, directory: [], signerId: null, message: null, busy: false };
 
 const PROFILE_FIELDS = [
   ["display_name", "Nazwa", "input"],
@@ -29,17 +29,32 @@ const EXT_TYPES = {
 // start
 
 async function start() {
+  // Publiczny odczyt nie wymaga sesji; /api/me jest tylko opcjonalnym
+  // kontekstem do przyszłego podpisywania zmian.
   try {
     state.me = await api.me();
     api.setCsrf(state.me.csrf);
   } catch (e) {
-    if (e.status === 401) return location.assign("/login");
-    throw e;
+    if (e.status !== 401) throw e;
   }
-  renderUnlock();
+
+  state.directory = await api.identities();
+  const ref = new URLSearchParams(location.search).get("ref");
+  const initial = ref || state.me?.identities[0]?.id || state.directory[0]?.id;
+  if (initial) {
+    try {
+      await select(initial);
+    } catch (e) {
+      state.message = { text: e.status === 404 ? "Nie znaleziono tożsamości." : e.message, kind: "bad" };
+      renderReadOnly();
+    }
+  } else {
+    renderReadOnly();
+  }
 }
 
 function renderUnlock(error) {
+  if (!state.me) return location.assign("/login");
   const pass = h("input", { id: "pass", type: "password", autocomplete: "current-password", required: true });
   mount(root,
     h("h1", {}, "Pracownia"),
@@ -49,7 +64,7 @@ function renderUnlock(error) {
         e.preventDefault();
         try {
           state.vault = await Vault.unlock(pass.value);
-          await select(state.me.identities[0]?.id);
+          await select(state.current || state.me.identities[0]?.id);
         } catch (err) {
           renderUnlock(err instanceof WrongPassphrase ? err.message : err.message);
         }
@@ -57,24 +72,25 @@ function renderUnlock(error) {
       field("Hasło skarbca kluczy", pass),
       h("div", { class: "actions" },
         h("button", { class: "btn primary", type: "submit" }, "Odblokuj"),
+        h("button", { class: "btn", type: "button", onclick: renderReadOnly }, "Wróć do przeglądania"),
         h("button", { class: "btn", type: "button", onclick: onLogout }, "Wyloguj"))));
 }
 
 async function select(id) {
-  if (!id) {
-    return mount(root, h("h1", {}, "Pracownia"), h("p", {}, "Ten klucz logowania nie należy jeszcze do żadnej tożsamości. "), h("a", { href: "/join" }, "Załóż tożsamość"));
-  }
-  state.current = id;
-  state.data = await api.identity(id);
-  const mine = state.vault.keys.filter((k) => k.kind === "signing");
-  const preferred = mine.find((k) => k.id === state.data.founding_key) || mine.find((k) => state.data.members.some((m) => m.key_id === k.id && m.status === "active"));
+  state.data = id ? await api.identity(id) : null;
+  state.current = state.data?.id || null;
+  const mine = state.vault?.keys.filter((k) => k.kind === "signing") || [];
+  const preferred = mine.find((k) => k.id === state.data?.founding_key) ||
+    mine.find((k) => state.data?.members.some((m) => m.key_id === k.id && m.status === "active"));
   state.signerId = preferred?.id ?? mine[0]?.id ?? null;
-  render();
+  if (state.vault && state.data) render();
+  else renderReadOnly();
 }
 
 async function reload() {
   state.data = await api.identity(state.current);
-  render();
+  if (state.vault) render();
+  else renderReadOnly();
 }
 
 async function onLogout() {
@@ -88,6 +104,83 @@ function say(text, kind = "info") {
   state.message = text ? { text, kind } : null;
   const box = document.getElementById("msg");
   if (box) box.replaceChildren(...(text ? [notice(text, kind)] : []));
+}
+
+// Podgląd publicznych danych: bez skarbca, bez sesji i bez formularzy zapisujących.
+function renderReadOnly() {
+  const d = state.data;
+  const ref = h("input", { id: "studio-ref", name: "ref", autocomplete: "off",
+    placeholder: "@uchwyt lub pełne id", value: new URLSearchParams(location.search).get("ref") || "" });
+
+  const browse = h("form", { class: "inline", onsubmit: (e) => {
+    e.preventDefault();
+    const value = ref.value.trim().replace(/^@/, "");
+    if (value) location.assign("/studio?ref=" + encodeURIComponent(value));
+  } },
+    field("Otwórz tożsamość", ref, "Działa również dla nieindeksowanych, jeśli znasz adres."),
+    h("button", { class: "btn", type: "submit" }, "Otwórz"));
+
+  const links = h("ul", { class: "res-list" }, state.directory.map((entry) =>
+    h("li", {}, h("a", { href: "/studio?ref=" + encodeURIComponent(entry.handle || entry.id) },
+      entry.display_name || (entry.handle ? "@" + entry.handle : short(entry.id))),
+    " · ", entry.kind === "collective" ? "kolektyw" : "osoba")));
+
+  mount(root,
+    h("h1", {}, "Pracownia"),
+    h("p", { class: "lead" }, "Przeglądaj profile, materiały, klucze i uprawnienia bez logowania. Podpis jest potrzebny dopiero do zapisu."),
+    h("div", { id: "msg", "aria-live": "polite" }, state.message && notice(state.message.text, state.message.kind)),
+    browse,
+    h("section", { class: "panel", "aria-labelledby": "directory-h" },
+      h("h2", { id: "directory-h" }, "Katalog"),
+      state.directory.length ? links : h("p", { class: "muted" }, "Jeszcze nie ma publicznych tożsamości.")),
+    d && readOnlyIdentity(d));
+}
+
+function readOnlyIdentity(d) {
+  const profile = d.profile || {};
+  return h("div", { class: "stack" },
+    h("section", { class: "panel", "aria-labelledby": "preview-h" },
+      h("h2", { id: "preview-h" }, profile.display_name || (d.handle ? "@" + d.handle : short(d.id))),
+      h("p", { class: "muted" }, d.kind === "collective" ? "Kolektyw" : "Osoba", " · ",
+        d.visibility === "unlisted" ? "Nieindeksowana" : "Publiczna", " · ",
+        h("a", { href: "/i/" + encodeURIComponent(d.handle || d.id) }, "Profil publiczny")),
+      h("p", {}, profile.bio || "Brak opisu."),
+      ...["location", "website"].filter((key) => profile[key]).map((key) =>
+        h("p", {}, key === "location" ? "Miejsce: " : "Strona: ", profile[key])),
+      h("p", { class: "muted" }, "Id: ", h("code", {}, d.id)),
+      d.site_url && h("p", {}, h("a", { href: d.site_url, rel: "noopener" }, "Otwórz stronę tożsamości")),
+      h("div", { class: "actions" },
+        h("button", { class: "btn primary", type: "button", onclick: () => state.me ? renderUnlock() : location.assign("/login") },
+          state.me ? "Odblokuj edycję" : "Zaloguj się, aby edytować"))),
+    h("section", { class: "panel", "aria-labelledby": "read-res-h" },
+      h("h2", { id: "read-res-h" }, "Zasoby"),
+      d.resources.length ? h("ul", { class: "res-list" }, d.resources.map((r) =>
+        h("li", {},
+          r.kind === "image" && h("img", { src: "/blobs/" + r.hash, alt: r.meta?.alt || "", width: 80, loading: "lazy" }),
+          h("span", { class: "res-main" }, h("code", {}, r.path), " · ", r.meta?.title || r.media_type,
+            " · ", fmtSize(r.size)),
+          (r.kind === "image" || r.kind === "audio") && h("a", { href: "/blobs/" + r.hash }, "Otwórz"))))
+      : h("p", { class: "muted" }, "Brak zasobów.")),
+    h("section", { class: "panel", "aria-labelledby": "read-grants-h" },
+      h("h2", { id: "read-grants-h" }, "Uprawnienia"),
+      d.grants.length ? h("ul", { class: "res-list" }, d.grants.map((g) =>
+        h("li", {}, h("code", {}, g.action), " · ", h("code", {}, g.resource),
+          " · ", g.status, " · klucz ", h("code", {}, short(g.subject_key_id)))))
+      : h("p", { class: "muted" }, "Brak przyznanych uprawnień.")),
+    h("section", { class: "panel", "aria-labelledby": "read-keys-h" },
+      h("h2", { id: "read-keys-h" }, "Klucze publiczne"),
+      h("p", {}, "Klucz założycielski: ", h("code", {}, d.founding_key)),
+      h("h3", {}, "Klucze autoryzacji"),
+      h("ul", { class: "res-list" }, d.auth_keys.map((key) => h("li", {}, h("code", {}, key.key_id), " · ", key.status))),
+      h("h3", {}, "Klucze sygnowania"),
+      d.members.length ? h("ul", { class: "res-list" }, d.members.map((key) =>
+        h("li", {}, h("code", {}, key.key_id), " · ", key.status)))
+      : h("p", { class: "muted" }, "Brak dodatkowych kluczy.")),
+    h("section", { class: "panel", "aria-labelledby": "read-history-h" },
+      h("h2", { id: "read-history-h" }, "Dziennik"),
+      h("p", {}, "Ostatnie zdarzenie: #", d.head.seq, " · ", h("code", {}, d.head.id)),
+      h("p", {}, h("a", { href: "/api/identities/" + encodeURIComponent(d.id) }, "Pełne dane tożsamości (JSON)")),
+      h("a", { href: "/api/identities/" + encodeURIComponent(d.id) + "/events" }, "Wszystkie podpisane zdarzenia (JSON)")));
 }
 
 // podpisywanie
@@ -140,6 +233,7 @@ function render() {
     h("div", { id: "msg", "aria-live": "polite" }, state.message && notice(state.message.text, state.message.kind)),
     ident,
     profileSection(d),
+    visibilitySection(d),
     resourcesSection(d),
     grantsSection(d, rel),
     keysSection(d),
@@ -170,6 +264,23 @@ function profileSection(d) {
       } },
       PROFILE_FIELDS.map(([name, label]) => field(label, inputs[name])),
       h("div", { class: "actions" }, h("button", { class: "btn primary", type: "submit", id: "save-profile" }, "Podpisz i zapisz profil"))));
+}
+
+// Widoczność nie jest częścią profilu: zawsze zmieniamy ją podpisanym zdarzeniem.
+function visibilitySection(d) {
+  const visibility = h("select", { id: "i-visibility" },
+    h("option", { value: "public", selected: d.visibility === "public" }, "Publiczna (w katalogu)"),
+    h("option", { value: "unlisted", selected: d.visibility === "unlisted" }, "Nieindeksowana (tylko z linku)"));
+  return h("section", { class: "panel", "aria-labelledby": "visibility-h" },
+    h("h2", { id: "visibility-h" }, "Widoczność"),
+    h("p", { class: "muted" }, "Nieindeksowana tożsamość nie pojawia się w katalogu ani galerii. Profil, historia, pliki i własna strona nadal są dostępne z bezpośredniego adresu."),
+    h("form", { class: "stack", onsubmit: async (e) => {
+      e.preventDefault();
+      if (visibility.value === d.visibility) return say("Widoczność się nie zmieniła.");
+      await act("identity.visibility.set", { visibility: visibility.value });
+    } },
+      field("Widoczność profilu", visibility),
+      h("div", { class: "actions" }, h("button", { class: "btn primary", type: "submit", id: "save-visibility" }, "Podpisz zmianę widoczności"))));
 }
 
 // zasoby

@@ -22,7 +22,12 @@ defmodule Oktavarium.CliTest do
     path
   end
 
-  defp genesis!(dir, key_path, name \\ "genesis.json", opts \\ [kind: "user", handle: "pelagia"]) do
+  defp genesis!(
+         dir,
+         key_path,
+         name \\ "genesis.json",
+         opts \\ [kind: "person", handle: "pelagia"]
+       ) do
     {:ok, %{envelope: envelope, event: event}} = Cli.create_identity(key_path, opts)
     {save!(dir, name, envelope), event}
   end
@@ -118,7 +123,7 @@ defmodule Oktavarium.CliTest do
 
       assert {:ok, %{envelope: envelope, event: event}} =
                Cli.create_identity(key_path,
-                 kind: "user",
+                 kind: "person",
                  handle: "pelagia",
                  auth_keys: [auth_id]
                )
@@ -126,28 +131,43 @@ defmodule Oktavarium.CliTest do
       assert event.genesis?
       assert event.identity == event.id
       assert event.signer == key_id
-      assert event.body == %{"kind" => "user", "handle" => "pelagia", "auth_keys" => [auth_id]}
+      assert event.body == %{"kind" => "person", "handle" => "pelagia", "auth_keys" => [auth_id]}
       assert {:ok, ^event} = Envelope.verify(envelope)
+    end
+
+    test "obsługuje osobę, kolektyw oraz widoczność bez prywatności", %{tmp_dir: dir} do
+      {key_path, _} = key!(dir, "sign.key")
+
+      assert {:ok, %{event: event}} =
+               Cli.create_identity(key_path, kind: "collective", visibility: "unlisted")
+
+      assert event.body == %{"kind" => "collective", "visibility" => "unlisted"}
+
+      assert {:error, {:invalid_option, :visibility, "restricted"}} =
+               Cli.create_identity(key_path, kind: "person", visibility: "restricted")
+
+      assert {:error, {:invalid_option, :kind, "project"}} =
+               Cli.create_identity(key_path, kind: "project")
     end
 
     test "handle i auth_keys są opcjonalne i wtedy nie trafiają do ładunku", %{tmp_dir: dir} do
       {key_path, _} = key!(dir, "sign.key")
 
-      assert {:ok, %{event: event}} = Cli.create_identity(key_path, kind: "project")
-      assert event.body == %{"kind" => "project"}
+      assert {:ok, %{event: event}} = Cli.create_identity(key_path, kind: "collective")
+      assert event.body == %{"kind" => "collective"}
     end
 
     test "wymaga klucza sygnowania, a nie autoryzacji", %{tmp_dir: dir} do
       {auth_path, _} = key!(dir, "auth.key", "auth")
 
       assert {:error, {:wrong_key_kind, :signing}} =
-               Cli.create_identity(auth_path, kind: "user")
+               Cli.create_identity(auth_path, kind: "person")
     end
 
     test "odrzuca niepoprawne dane wejściowe", %{tmp_dir: dir} do
       {key_path, _} = key!(dir, "sign.key")
 
-      assert {:error, {:missing_option, :key}} = Cli.create_identity(nil, kind: "user")
+      assert {:error, {:missing_option, :key}} = Cli.create_identity(nil, kind: "person")
       assert {:error, {:missing_option, :kind}} = Cli.create_identity(key_path, [])
 
       assert {:error, {:invalid_option, :kind, "bóg"}} =
@@ -155,11 +175,11 @@ defmodule Oktavarium.CliTest do
 
       for handle <- ["A", "x", "Pelagia", "ma spacje", String.duplicate("a", 33)] do
         assert {:error, {:invalid_option, :handle, ^handle}} =
-                 Cli.create_identity(key_path, kind: "user", handle: handle)
+                 Cli.create_identity(key_path, kind: "person", handle: handle)
       end
 
       assert {:error, {:invalid_key_id, "zly"}} =
-               Cli.create_identity(key_path, kind: "user", auth_keys: ["zly"])
+               Cli.create_identity(key_path, kind: "person", auth_keys: ["zly"])
     end
 
     test "deduplikuje klucze autoryzacji", %{tmp_dir: dir} do
@@ -167,7 +187,7 @@ defmodule Oktavarium.CliTest do
       {_, auth_id} = key!(dir, "auth.key", "auth")
 
       assert {:ok, %{event: event}} =
-               Cli.create_identity(key_path, kind: "user", auth_keys: [auth_id, auth_id])
+               Cli.create_identity(key_path, kind: "person", auth_keys: [auth_id, auth_id])
 
       assert event.body["auth_keys"] == [auth_id]
     end
@@ -583,7 +603,7 @@ defmodule Oktavarium.CliTest do
 
     test "zdarzenia różnych tożsamości", %{tmp_dir: dir} = ctx do
       {other_key, _} = key!(dir, "other.key")
-      {other_genesis, _} = genesis!(dir, other_key, "other-genesis.json", kind: "org")
+      {other_genesis, _} = genesis!(dir, other_key, "other-genesis.json", kind: "collective")
       {other_grant, _} = grant!(dir, other_key, other_genesis, ctx.bot_id, "other-g1.json")
 
       assert {:error, {:broken_chain, ^other_grant, :identity_mismatch}} =
@@ -634,9 +654,12 @@ defmodule Oktavarium.CliTest do
       switches = [kind: :string, auth_key: [:string, :keep]]
 
       assert {:ok, opts, []} =
-               Cli.parse_args(["--kind", "user", "--auth-key", "a", "--auth-key", "b"], switches)
+               Cli.parse_args(
+                 ["--kind", "person", "--auth-key", "a", "--auth-key", "b"],
+                 switches
+               )
 
-      assert opts[:kind] == "user"
+      assert opts[:kind] == "person"
       assert Keyword.get_values(opts, :auth_key) == ["a", "b"]
     end
 

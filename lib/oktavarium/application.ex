@@ -8,6 +8,7 @@ defmodule Oktavarium.Application do
       Oktavarium.Repo,
       OktavariumWeb.Endpoint
     ]
+
     Supervisor.start_link(children, strategy: :one_for_one, name: Oktavarium.Supervisor)
   end
 end

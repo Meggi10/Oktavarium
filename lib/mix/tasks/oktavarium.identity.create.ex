@@ -7,6 +7,7 @@ defmodule Mix.Tasks.Oktavarium.Identity.Create do
   @switches [
     key: :string,
     kind: :string,
+    visibility: :string,
     handle: :string,
     auth_key: [:string, :keep],
     out: :string
@@ -20,6 +21,7 @@ defmodule Mix.Tasks.Oktavarium.Identity.Create do
          {:ok, %{envelope: envelope, event: event}} <-
            Cli.create_identity(opts[:key], [
              {:kind, opts[:kind]},
+             {:visibility, opts[:visibility]},
              {:handle, opts[:handle]},
              {:auth_keys, Keyword.get_values(opts, :auth_key)}
            ]),

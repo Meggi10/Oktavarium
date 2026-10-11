@@ -11,7 +11,7 @@ const g = await buildEnvelope({
   signer: founder,
   type: "identity.genesis",
   seq: 0,
-  body: { kind: "user", handle: "z-przegladarki", auth_keys: [auth.id] },
+  body: { kind: "person", handle: "z-przegladarki", auth_keys: [auth.id] },
 });
 
 const u = await buildEnvelope({

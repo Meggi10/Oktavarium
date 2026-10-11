@@ -48,7 +48,7 @@ defmodule Mix.Tasks.OktavariumTasksTest do
       "--key",
       sign,
       "--kind",
-      "user",
+      "person",
       "--handle",
       "pelagia",
       "--auth-key",
@@ -98,7 +98,7 @@ defmodule Mix.Tasks.OktavariumTasksTest do
       "--key",
       sign,
       "--kind",
-      "user",
+      "person",
       "--auth-key",
       dash_auth,
       "--out",
@@ -128,7 +128,17 @@ defmodule Mix.Tasks.OktavariumTasksTest do
     Key.Gen.run(["--out", sign])
     _ = infos()
 
-    Identity.Create.run(["--key", sign, "--kind", "org", "--out", Path.join(dir, "g.json")])
+    Identity.Create.run([
+      "--key",
+      sign,
+      "--kind",
+      "collective",
+      "--visibility",
+      "unlisted",
+      "--out",
+      Path.join(dir, "g.json")
+    ])
+
     assert infos() =~ "Uwaga: nie podano --auth-key"
   end
 
@@ -140,7 +150,9 @@ defmodule Mix.Tasks.OktavariumTasksTest do
     stdout =
       capture_io(fn ->
         stderr =
-          capture_io(:stderr, fn -> Identity.Create.run(["--key", sign, "--kind", "project"]) end)
+          capture_io(:stderr, fn ->
+            Identity.Create.run(["--key", sign, "--kind", "collective"])
+          end)
 
         send(self(), {:stderr, stderr})
       end)
@@ -181,7 +193,7 @@ defmodule Mix.Tasks.OktavariumTasksTest do
 
     Key.Gen.run(["--out", sign])
     Key.Gen.run(["--out", bot])
-    Identity.Create.run(["--key", sign, "--kind", "user", "--out", g])
+    Identity.Create.run(["--key", sign, "--kind", "person", "--out", g])
     Grant.run(["--key", sign, "--after", g, "--to", key_id!(bot), "--action", "a.b", "--out", g1])
 
     Grant.run([
@@ -209,7 +221,7 @@ defmodule Mix.Tasks.OktavariumTasksTest do
     [g, p1, p2] = for n <- 0..2, do: Path.join(dir, "#{n}.json")
 
     Key.Gen.run(["--out", sign])
-    Identity.Create.run(["--key", sign, "--kind", "user", "--out", g])
+    Identity.Create.run(["--key", sign, "--kind", "person", "--out", g])
     _ = infos()
 
     Profile.run([
@@ -243,7 +255,7 @@ defmodule Mix.Tasks.OktavariumTasksTest do
     sign = Path.join(dir, "sign.key")
     g = Path.join(dir, "0.json")
     Key.Gen.run(["--out", sign])
-    Identity.Create.run(["--key", sign, "--kind", "user", "--out", g])
+    Identity.Create.run(["--key", sign, "--kind", "person", "--out", g])
     _ = infos()
 
     assert_raise Mix.Error, ~r/--after/, fn -> Profile.run(["--key", sign, "--set", "bio=x"]) end

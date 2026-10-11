@@ -11,7 +11,7 @@ defmodule Oktavarium.LogTest do
   defp id(keypair), do: Crypto.key_id(keypair.public)
 
   defp found(founder, auth, body \\ %{}) do
-    body = Map.merge(%{"kind" => "user", "auth_keys" => [id(auth)]}, body)
+    body = Map.merge(%{"kind" => "person", "auth_keys" => [id(auth)]}, body)
     envelope = Envelope.genesis(body, founder)
     {envelope, Log.append(envelope)}
   end
@@ -51,9 +51,10 @@ defmodule Oktavarium.LogTest do
       {envelope, {:ok, event}} = found(founder, auth, %{"handle" => "pelagia"})
 
       identity = Repo.get!(Identity, event.id)
-      assert identity.kind == :user
+      assert identity.kind == :person
       assert identity.handle == "pelagia"
-      assert identity.parent_id == nil
+      assert identity.visibility == :public
+      refute :parent_id in Identity.__schema__(:fields)
 
       signing = Repo.get!(Key, id(founder))
       assert signing.kind == :signing
@@ -88,6 +89,48 @@ defmodule Oktavarium.LogTest do
       assert id == event.id
     end
 
+    test "kolektyw i nieindeksowana widoczność po genesis" do
+      event = found!(kp(), kp(), %{"kind" => "collective", "visibility" => "unlisted"})
+      identity = Repo.get!(Identity, event.id)
+      assert identity.kind == :collective
+      assert identity.visibility == :unlisted
+      assert :ok = Log.verify(event.id)
+    end
+
+    test "widoczność można zmieniać wyłącznie podpisanym, autoryzowanym zdarzeniem" do
+      founder = kp()
+      identity = found!(founder, kp(), %{"handle" => "pelagia"})
+
+      set = fn signer, seq, prev, visible ->
+        Envelope.sign(
+          %{
+            type: "identity.visibility.set",
+            seq: seq,
+            prev: prev,
+            identity: identity.id,
+            body: %{"visibility" => visible}
+          },
+          signer
+        )
+      end
+
+      assert {:error, :unknown_signer} = Log.append(set.(kp(), 1, identity.id, "unlisted"))
+      stranger = kp()
+      found!(stranger, kp())
+      assert {:error, :not_authorized} = Log.append(set.(stranger, 1, identity.id, "unlisted"))
+      assert Repo.get!(Identity, identity.id).visibility == :public
+
+      assert {:ok, %{id: head}} = Log.append(set.(founder, 1, identity.id, "unlisted"))
+      assert Repo.get!(Identity, identity.id).visibility == :unlisted
+
+      assert {:error, {:invalid_body, "visibility"}} =
+               Log.append(set.(founder, 2, head, "restricted"))
+
+      assert {:ok, %{seq: 2}} = Log.append(set.(founder, 2, head, "public"))
+      assert Repo.get!(Identity, identity.id).visibility == :public
+      assert :ok = Log.verify(identity.id)
+    end
+
     test "powtórzenie tej samej koperty jest odrzucane i nic nie zmienia" do
       founder = kp()
       auth = kp()
@@ -99,7 +142,7 @@ defmodule Oktavarium.LogTest do
     end
 
     test "bez klucza autoryzacji nic nie jest zapisywane" do
-      envelope = Envelope.genesis(%{"kind" => "user"}, kp())
+      envelope = Envelope.genesis(%{"kind" => "person"}, kp())
 
       assert {:error, :auth_key_required} = Log.append(envelope)
       assert counts() == %{identities: 0, keys: 0, links: 0, events: 0, grants: 0}
@@ -121,7 +164,7 @@ defmodule Oktavarium.LogTest do
       founder = kp()
       found!(founder, kp())
 
-      {_envelope, result} = found(founder, kp(), %{"kind" => "org"})
+      {_envelope, result} = found(founder, kp(), %{"kind" => "collective"})
       assert result == {:error, :signing_key_already_registered}
     end
 
@@ -149,8 +192,8 @@ defmodule Oktavarium.LogTest do
     end
 
     test "uszkodzona koperta" do
-      envelope = Envelope.genesis(%{"kind" => "user", "auth_keys" => [id(kp())]}, kp())
-      tampered = %{envelope | payload: String.replace(envelope.payload, "user", "admn")}
+      envelope = Envelope.genesis(%{"kind" => "person", "auth_keys" => [id(kp())]}, kp())
+      tampered = %{envelope | payload: String.replace(envelope.payload, "person", "admn")}
 
       assert {:error, {:invalid_envelope, :bad_signature}} = Log.append(tampered)
       assert counts().events == 0
@@ -727,14 +770,14 @@ defmodule Oktavarium.LogTest do
 
       {:ok, %{envelope: pelagia_genesis, event: pelagia}} =
         Cli.create_identity(path.("pelagia.key"),
-          kind: "user",
+          kind: "person",
           handle: "pelagia",
           auth_keys: [auth_id]
         )
 
       {:ok, %{envelope: bot_genesis}} =
         Cli.create_identity(path.("bot.key"),
-          kind: "user",
+          kind: "person",
           handle: "pelagia-bot",
           auth_keys: [auth_id]
         )
@@ -774,9 +817,9 @@ defmodule Oktavarium.LogTest do
 
       identities =
         for {name, kind, handle} <- [
-              {"pelagia", "user", "pelagia"},
-              {"bot", "user", "pelagia-bot"},
-              {"carol", "user", "carol"}
+              {"pelagia", "person", "pelagia"},
+              {"bot", "person", "pelagia-bot"},
+              {"carol", "person", "carol"}
             ] do
           {:ok, %{envelope: envelope, event: event}} =
             Cli.create_identity(path.("#{name}.key"),
@@ -848,14 +891,14 @@ defmodule Oktavarium.LogTest do
 
       {:ok, %{envelope: g0, event: pelagia}} =
         Cli.create_identity(path.("pelagia.key"),
-          kind: "user",
+          kind: "person",
           handle: "pelagia",
           auth_keys: [auth_id]
         )
 
       {:ok, %{envelope: b0}} =
         Cli.create_identity(path.("bot.key"),
-          kind: "user",
+          kind: "person",
           handle: "pelagia-bot",
           auth_keys: [auth_id]
         )

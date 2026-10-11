@@ -8,7 +8,10 @@ defmodule OktavariumWeb.ApiTest do
   alias Oktavarium.Identities.Identity
 
   defp genesis_envelope(founder, auth, body \\ %{}) do
-    Envelope.genesis(Map.merge(%{"kind" => "user", "auth_keys" => [key_id(auth)]}, body), founder)
+    Envelope.genesis(
+      Map.merge(%{"kind" => "person", "auth_keys" => [key_id(auth)]}, body),
+      founder
+    )
   end
 
   defp post_envelope(conn, envelope), do: post(conn, ~p"/api/events", Envelope.to_map(envelope))

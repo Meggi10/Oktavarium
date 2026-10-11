@@ -187,12 +187,41 @@ defmodule OktavariumWeb.BrowserApiTest do
       assert conn |> get("/blobs/#{hash(html)}") |> response(404)
     end
 
-    test "niepubliczna tożsamość nie wystawia blobów", %{conn: conn} do
-      state = found!(handle: "cicha")
+    test "bloby tożsamości unlisted są dostępne po adresie", %{conn: conn} do
+      state = found!(handle: "cicha", visibility: "unlisted")
       {:ok, _} = Blobs.put(@png, "image/png")
       _ = put_resource(state, "images/a.png", @png, "image/png")
-      Repo.update_all(Oktavarium.Identities.Identity, set: [visibility: :restricted])
-      assert conn |> get("/blobs/#{hash(@png)}") |> response(404)
+      assert conn |> get("/blobs/#{hash(@png)}") |> response(200) == @png
+    end
+  end
+
+  describe "publiczny odczyt bez sesji" do
+    test "katalog pokazuje tylko indeksowane tożsamości", %{conn: conn} do
+      published = found!(handle: "widoczna", kind: "collective")
+      hidden = found!(handle: "bez-listy", visibility: "unlisted")
+
+      assert %{"identities" => [%{"id" => id, "kind" => "collective"}]} =
+               conn |> get("/api/identities") |> json_response(200)
+
+      assert id == published.id
+
+      assert %{"id" => hidden_id, "visibility" => "unlisted"} =
+               build_conn() |> get("/api/identities/bez-listy") |> json_response(200)
+
+      assert hidden_id == hidden.id
+
+      assert %{"seq" => 0} =
+               build_conn() |> get("/api/identities/#{hidden.id}/head") |> json_response(200)
+
+      assert %{"events" => [_]} =
+               build_conn() |> get("/api/identities/#{hidden.id}/events") |> json_response(200)
+    end
+
+    test "niezalogowana pracownia zwraca powłokę do publicznego odczytu", %{conn: conn} do
+      assert conn |> get("/studio") |> html_response(200) =~ ~s(data-page="studio")
+
+      assert %{"error" => %{"code" => "unauthenticated"}} =
+               build_conn() |> get("/api/me") |> json_response(401)
     end
   end
 
@@ -246,7 +275,7 @@ defmodule OktavariumWeb.BrowserApiTest do
     defp genesis(body \\ %{}),
       do:
         Envelope.genesis(
-          Map.merge(%{"kind" => "user", "auth_keys" => [key_id(keypair())]}, body),
+          Map.merge(%{"kind" => "person", "auth_keys" => [key_id(keypair())]}, body),
           keypair()
         )
 
@@ -344,20 +373,16 @@ defmodule OktavariumWeb.BrowserApiTest do
       assert body["founding_key"] == key_id(state.founder)
     end
 
-    test "niepubliczna: tylko dla właściciela po zalogowaniu", %{conn: conn} do
-      state = found!(handle: "cicha")
-      Repo.update_all(Oktavarium.Identities.Identity, set: [visibility: :restricted])
+    test "unlisted: szczegóły API publiczne dla każdego z bezpośrednim adresem", %{conn: conn} do
+      state = found!(handle: "cicha", visibility: "unlisted")
 
-      assert %{"error" => %{"code" => "unknown_identity"}} =
-               conn |> get(~p"/api/identities/cicha") |> json_response(404)
+      assert %{"id" => id, "visibility" => "unlisted"} =
+               conn |> get(~p"/api/identities/cicha") |> json_response(200)
 
-      {session_conn, _csrf, _} = login(build_conn(), state)
-      assert %{"id" => id} = session_conn |> get(~p"/api/identities/cicha") |> json_response(200)
       assert id == state.id
 
-      stranger = found!()
-      {other_conn, _, _} = login(build_conn(), stranger)
-      assert other_conn |> get(~p"/api/identities/cicha") |> json_response(404)
+      assert %{"id" => ^id} =
+               build_conn() |> get("/api/identities/#{state.id}") |> json_response(200)
     end
   end
 
@@ -383,11 +408,10 @@ defmodule OktavariumWeb.BrowserApiTest do
       assert html =~ ~s(href="/i/pelagia")
     end
 
-    test "niepubliczne zasoby nie trafiają do galerii", %{conn: conn} do
-      state = found!(handle: "cicha")
+    test "unlisted zasoby nie trafiają do galerii", %{conn: conn} do
+      state = found!(handle: "cicha", visibility: "unlisted")
       {:ok, _} = Blobs.put(@png, "image/png")
       _ = put_resource(state, "images/a.png", @png, "image/png")
-      Repo.update_all(Oktavarium.Identities.Identity, set: [visibility: :restricted])
       refute conn |> get(~p"/") |> html_response(200) =~ hash(@png)
     end
 
@@ -473,13 +497,12 @@ defmodule OktavariumWeb.BrowserApiTest do
       assert site_conn("pelagia") |> get("/%2e%2e/etc/passwd") |> response(404)
     end
 
-    test "niepubliczna tożsamość nie ma strony" do
-      state = found!(handle: "cicha")
-      html = "<p>sekret</p>"
+    test "strona unlisted działa po adresie subdomeny" do
+      state = found!(handle: "cicha", visibility: "unlisted")
+      html = "<p>Opublikowana strona</p>"
       {:ok, _} = Blobs.put(html, "text/html")
       _ = put_resource(state, "site/index.html", html, "text/html")
-      Repo.update_all(Oktavarium.Identities.Identity, set: [visibility: :restricted])
-      assert site_conn("cicha") |> get("/") |> response(404)
+      assert site_conn("cicha") |> get("/") |> response(200) == html
     end
 
     test "host spoza domeny stron trafia do zwykłej aplikacji", %{conn: conn} do

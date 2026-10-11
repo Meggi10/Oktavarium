@@ -15,8 +15,9 @@ defmodule Oktavarium.Fixtures do
     auth = Keyword.get(opts, :auth, keypair())
 
     body =
-      %{"kind" => Keyword.get(opts, :kind, "user"), "auth_keys" => [key_id(auth)]}
+      %{"kind" => Keyword.get(opts, :kind, "person"), "auth_keys" => [key_id(auth)]}
       |> then(&if(opts[:handle], do: Map.put(&1, "handle", opts[:handle]), else: &1))
+      |> then(&if(opts[:visibility], do: Map.put(&1, "visibility", opts[:visibility]), else: &1))
 
     {:ok, event} = body |> Envelope.genesis(founder) |> Log.append()
     %{id: event.id, founder: founder, auth: auth, seq: 0, head: event.id}
@@ -35,6 +36,7 @@ defmodule Oktavarium.Fixtures do
         %{type: type, seq: state.seq + 1, identity: state.id, prev: state.head, body: body},
         signer || state.founder
       )
+
     {:ok, event} = Log.append(envelope)
     {%{state | seq: event.seq, head: event.id}, event}
   end
@@ -43,9 +45,14 @@ defmodule Oktavarium.Fixtures do
   def grant!(state, subject, action, resource_suffix, extra \\ %{}) do
     body =
       Map.merge(
-        %{"subject" => key_id(subject), "action" => action, "resource" => state.id <> resource_suffix},
+        %{
+          "subject" => key_id(subject),
+          "action" => action,
+          "resource" => state.id <> resource_suffix
+        },
         extra
       )
+
     next_event!(state, "grant.create", body)
   end
 end

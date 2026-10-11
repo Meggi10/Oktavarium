@@ -4,7 +4,6 @@ defmodule OktavariumWeb.PagesTest do
   import Oktavarium.Fixtures
 
   alias Oktavarium.Grants.Grant
-  alias Oktavarium.Identities.Identity
   alias Oktavarium.Log.Event
 
   defp html(conn, status \\ 200), do: html_response(conn, status)
@@ -20,25 +19,21 @@ defmodule OktavariumWeb.PagesTest do
       refute body =~ ~s(class="directory")
     end
 
-    test "lista tożsamości z nazwą, uchwytem, rodzajem i liczbą zdarzeń", %{conn: conn} do
-      pelagia =
-        found!(handle: "pelagia")
-        |> profile!(%{"display_name" => "Pelagia", "bio" => "Rysuję\ni piszę kod."})
+    test "lista profili z nazwą, uchwytem, opisem i rodzajem", %{conn: conn} do
+      found!(handle: "pelagia")
+      |> profile!(%{"display_name" => "Pelagia", "bio" => "Rysuję\ni piszę kod."})
 
-      found!(handle: "druk", kind: "project")
+      found!(handle: "druk", kind: "collective")
 
       body = conn |> get(~p"/") |> html()
       assert body =~ ~s(class="directory")
       assert body =~ "Pelagia"
       assert body =~ "@pelagia"
       assert body =~ "Rysuję i piszę kod."
-      assert body =~ "użytkownik"
-      assert body =~ "projekt"
-      assert body =~ "2 zdarzenia"
-      assert body =~ "1 zdarzenie"
+      assert body =~ "osoba"
+      assert body =~ "kolektyw"
       assert body =~ ~s(href="/i/pelagia")
       assert body =~ ~s(href="/i/druk")
-      assert body =~ String.slice(pelagia.head, 0, 6)
       refute body =~ "Nie ma jeszcze żadnych tożsamości"
     end
 
@@ -155,14 +150,18 @@ defmodule OktavariumWeb.PagesTest do
       assert body =~ "bez uchwytu"
     end
 
-    test "nieznana albo ukryta tożsamość to 404", %{conn: conn, pelagia: pelagia} do
+    test "nieznana tożsamość to 404, nieindeksowana ma publiczny profil", %{
+      conn: conn,
+      pelagia: pelagia
+    } do
       assert_error_sent 404, fn -> get(conn, ~p"/i/nie-ma") end
 
-      Repo.get!(Identity, pelagia.id)
-      |> Ecto.Changeset.change(visibility: :restricted)
-      |> Repo.update!()
+      state = %{id: pelagia.id, seq: pelagia.seq, head: pelagia.head, founder: pelagia.founder}
+      _ = next!(state, "identity.visibility.set", %{"visibility" => "unlisted"})
 
-      assert_error_sent 404, fn -> get(build_conn(), ~p"/i/pelagia") end
+      body = build_conn() |> get(~p"/i/pelagia") |> html()
+      assert body =~ "Pelagia"
+      refute build_conn() |> get(~p"/") |> html() =~ ~s(href="/i/pelagia")
     end
 
     test "treść od użytkowników jest escapowana", %{conn: conn} do

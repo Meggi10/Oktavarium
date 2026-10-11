@@ -33,13 +33,13 @@ defmodule Oktavarium.DirectoryTest do
       assert beta.head == b.head
     end
 
-    test "tożsamość restricted jest niewidoczna" do
-      a = found!(handle: "alfa")
-      identity!(a.id) |> Ecto.Changeset.change(visibility: :restricted) |> Repo.update!()
+    test "tożsamość unlisted nie trafia do katalogu, ale działa bezpośredni adres" do
+      a = found!(handle: "alfa", visibility: "unlisted")
 
       assert Directory.list_identities() == []
-      assert Directory.get_identity(a.id) == nil
-      assert Directory.get_identity("alfa") == nil
+      assert %Identity{id: id, visibility: :unlisted} = Directory.get_identity(a.id)
+      assert id == a.id
+      assert %Identity{id: ^id} = Directory.get_identity("alfa")
     end
   end
 

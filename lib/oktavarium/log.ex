@@ -319,6 +319,19 @@ defmodule Oktavarium.Log do
 
   # Projekcja profilu: planner dał cały nowy profil. Odczyt i zapis są w tej samej
   # transakcji `BEGIN IMMEDIATE`, więc nikt nie zmieni profilu pomiędzy nimi.
+  defp apply_op({:visibility, %{identity_id: id, visibility: visibility}}, at) do
+    changeset =
+      Identity
+      |> Repo.get!(id)
+      |> Identity.visibility_changeset(%{visibility: visibility})
+      |> stamp([:updated_at], at)
+
+    case Repo.update(changeset) do
+      {:ok, _identity} -> :ok
+      {:error, changeset} -> Repo.rollback({:rejected, Identity, changeset_errors(changeset)})
+    end
+  end
+
   defp apply_op({:profile, %{identity_id: id, profile: profile}}, at) do
     identity = Repo.get!(Identity, id)
 

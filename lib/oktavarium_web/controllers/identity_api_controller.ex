@@ -2,11 +2,28 @@ defmodule OktavariumWeb.IdentityApiController do
   @moduledoc false
   use OktavariumWeb, :controller
 
-  alias Oktavarium.{Directory, Log, Sessions}
+  alias Oktavarium.{Directory, Log}
   alias OktavariumWeb.ApiError
 
+  # Dostępny bez sesji katalog. Tożsamości unlisted są odczytywalne przez show/2,
+  # ale nie trafiają do publicznego indeksu.
+  def index(conn, _params) do
+    identities =
+      Directory.list_identities()
+      |> Enum.map(fn %{identity: identity} ->
+        %{
+          id: identity.id,
+          handle: identity.handle,
+          kind: identity.kind,
+          display_name: (identity.profile || %{})["display_name"]
+        }
+      end)
+
+    json(conn, %{identities: identities})
+  end
+
   def show(conn, %{"ref" => ref}) do
-    with %{} = identity <- visible(ref, conn.assigns[:session]),
+    with %{} = identity <- Directory.get_identity(ref),
          {:ok, head} <- Log.head(identity.id) do
       json(conn, %{
         id: identity.id,
@@ -27,19 +44,6 @@ defmodule OktavariumWeb.IdentityApiController do
       _ -> ApiError.send(conn, :unknown_identity)
     end
   end
-
-  defp visible(ref, session) do
-    Directory.get_identity(ref) || owned(ref, session)
-  end
-
-  defp owned(ref, %{key_id: key_id}) do
-    case Enum.find(Sessions.identities(key_id), &(&1.id == ref or &1.handle == ref)) do
-      nil -> nil
-      %{id: id} -> Oktavarium.Repo.get(Oktavarium.Identities.Identity, id)
-    end
-  end
-
-  defp owned(_ref, _session), do: nil
 
   defp grant(g) do
     Map.take(g, [

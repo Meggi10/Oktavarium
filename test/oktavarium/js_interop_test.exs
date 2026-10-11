@@ -25,6 +25,7 @@ defmodule Oktavarium.JsInteropTest do
     identity = Repo.get!(Oktavarium.Identities.Identity, d["genesisId"])
     assert identity.profile["bio"] =~ "Zażółć"
     assert identity.handle == "z-przegladarki"
+    assert identity.kind == :person
     assert :ok = Log.verify(d["genesisId"])
   end
 

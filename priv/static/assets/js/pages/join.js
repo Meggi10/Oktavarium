@@ -10,10 +10,8 @@ import { short } from "../lib/bytes.js";
 const root = document.getElementById("app");
 const closed = root.dataset.registration === "closed";
 const KINDS = [
-  ["user", "Użytkownik"],
-  ["bot", "Maszyna"],
-  ["org", "Organizacja"],
-  ["project", "Projekt"],
+  ["person", "Osoba"],
+  ["collective", "Kolektyw"],
 ];
 
 const state = { vault: null, existing: false, founder: null, auth: null, backedUp: false, reuseAuth: true, busy: false, error: null };
@@ -28,6 +26,9 @@ function render() {
   const ids = h("div", { class: "keys-preview" });
 
   const kind = h("select", { id: "kind", name: "kind" }, KINDS.map(([v, l]) => h("option", { value: v }, l)));
+  const visibility = h("select", { id: "visibility", name: "visibility" },
+    h("option", { value: "public" }, "Publiczna (w katalogu)"),
+    h("option", { value: "unlisted" }, "Nieindeksowana (tylko z linku)"));
   const handle = h("input", {
     id: "handle", name: "handle", autocomplete: "off", maxlength: 32, pattern: "[a-z0-9][a-z0-9_-]{1,31}",
     placeholder: "np. pelagia (opcjonalnie)",
@@ -42,6 +43,7 @@ function render() {
 
   if (!state.founder) form.append(
     field("Rodzaj", kind),
+    field("Widoczność", visibility, "Nieindeksowana nie znaczy prywatna: profil, dziennik i pliki nadal są dostępne po adresie."),
     field("Uchwyt", handle, "Małe litery, cyfry, _ i -. Daje adres /i/uchwyt i stronę uchwyt.<domena stron>."),
     invite && field("Zaproszenie", invite, "Rejestracja jest zamknięta. Wklej token od operatora."),
     field(state.existing ? "Hasło skarbca kluczy" : "Hasło do skarbca kluczy", pass,
@@ -53,6 +55,7 @@ function render() {
   if (state.founder) {
     form.append(h("dl", { class: "facts" },
       h("div", {}, h("dt", {}, "Rodzaj"), h("dd", {}, KINDS.find(([k]) => k === state.v.kind)[1])),
+      h("div", {}, h("dt", {}, "Widoczność"), h("dd", {}, state.v.visibility === "unlisted" ? "Nieindeksowana" : "Publiczna")),
       h("div", {}, h("dt", {}, "Uchwyt"), h("dd", {}, state.v.handle ? "@" + state.v.handle : "bez uchwytu"))));
   }
 
@@ -88,6 +91,7 @@ function render() {
 
 const values = () => ({
   kind: document.getElementById("kind").value,
+  visibility: document.getElementById("visibility").value,
   handle: document.getElementById("handle").value.trim(),
   invite: document.getElementById("invite")?.value.trim(),
   pass: document.getElementById("pass").value,
@@ -156,7 +160,7 @@ async function create(v) {
   if (!state.auth.reused) state.vault.add(state.auth);
   await state.vault.save();
 
-  const body = { kind: v.kind, auth_keys: [state.auth.id] };
+  const body = { kind: v.kind, visibility: v.visibility, auth_keys: [state.auth.id] };
   if (v.handle) body.handle = v.handle;
 
   const created = await api.genesis({ founder: state.founder, body, invite: v.invite });

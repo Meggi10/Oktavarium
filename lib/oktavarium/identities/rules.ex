@@ -1,10 +1,15 @@
 defmodule Oktavarium.Identities.Rules do
   @moduledoc false
-  @kinds [:user, :bot, :org, :project]
+  @kinds [:person, :collective]
+  @visibilities [:public, :unlisted]
 
   @doc "Dozwolone rodzaje tożsamości."
   @spec kinds() :: [atom()]
   def kinds, do: @kinds
+
+  @doc "Dozwolone poziomy widoczności. `:unlisted` oznacza brak w katalogu, a nie prywatność."
+  @spec visibilities() :: [atom()]
+  def visibilities, do: @visibilities
 
   @doc "Zamienia nazwę rodzaju na atom (bez tworzenia nowych atomów)."
   @spec parse_kind(String.t()) :: {:ok, atom()} | :error
@@ -14,6 +19,14 @@ defmodule Oktavarium.Identities.Rules do
       kind -> {:ok, kind}
     end
   end
+
+  def parse_kind(_other), do: :error
+
+  @doc "Zamienia widoczność na atom, bez tworzenia nowych atomów."
+  @spec parse_visibility(term()) :: {:ok, :public | :unlisted} | :error
+  def parse_visibility("public"), do: {:ok, :public}
+  def parse_visibility("unlisted"), do: {:ok, :unlisted}
+  def parse_visibility(_other), do: :error
 
   @doc "Wyrażenie regularne poprawnego uchwytu (handle)."
   @spec handle_format() :: Regex.t()

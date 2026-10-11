@@ -18,10 +18,8 @@ defmodule OktavariumWeb.Components do
   def short(id) when is_binary(id), do: id
 
   @doc "Polska nazwa rodzaju tożsamości."
-  def kind_name(kind) when kind in [:user, "user"], do: "użytkownik"
-  def kind_name(kind) when kind in [:bot, "bot"], do: "maszyna"
-  def kind_name(kind) when kind in [:org, "org"], do: "organizacja"
-  def kind_name(kind) when kind in [:project, "project"], do: "projekt"
+  def kind_name(kind) when kind in [:person, "person"], do: "osoba"
+  def kind_name(kind) when kind in [:collective, "collective"], do: "kolektyw"
   def kind_name(_other), do: "tożsamość"
 
   @doc "Odmiana: `plural(1, \"zdarzenie\", \"zdarzenia\", \"zdarzeń\")`."

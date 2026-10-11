@@ -50,7 +50,9 @@ defmodule Mix.Tasks.OktavariumRebuildTest do
     a = found!()
     Repo.update_all(Oktavarium.Log.Event, set: [signature: <<0::512>>])
 
-    assert_raise Mix.Error, ~r/uszkodzone zdarzenie #{a.id}.*nie została zmieniona/, fn -> Rebuild.run(["--apply"]) end
+    assert_raise Mix.Error, ~r/uszkodzone zdarzenie #{a.id}.*nie została zmieniona/, fn ->
+      Rebuild.run(["--apply"])
+    end
   end
 
   test "nieznana opcja" do

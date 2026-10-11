@@ -56,6 +56,12 @@ with sync_playwright() as p:
     page.on("console", lambda m: problems.append(m.text) if m.type in ("error", "warning") else None)
     page.on("pageerror", lambda e: problems.append(str(e)))
 
+    # odczyt pracowni jest możliwy zanim powstaną sesje i klucze
+    page.goto(BASE + "/studio")
+    expect(page.locator("#studio-ref")).to_be_visible()
+    expect(page.locator("body")).to_contain_text("Przeglądaj profile")
+    assert page.locator("#pass").count() == 0
+
     # join + genesis w przeglądarce
     page.goto(BASE + "/join")
     page.fill("#handle", "pelagia")
@@ -73,7 +79,9 @@ with sync_playwright() as p:
     page.click("#create")
     page.wait_for_url("**/studio")
 
-    # studio: odblokowanie i profil
+    # studio: publiczny podgląd oraz jawne przejście do trybu edycji
+    expect(page.locator("#read-keys-h")).to_be_visible()
+    page.get_by_role("button", name="Odblokuj edycję").click()
     page.fill("#pass", PASS)
     page.get_by_role("button", name="Odblokuj").click()
     page.wait_for_selector("#p-display_name")
@@ -166,7 +174,7 @@ with sync_playwright() as p:
     # a strona nie może odczytać API aplikacji (inny origin, brak CORS)
     blocked = site.evaluate(f"fetch('http://localhost:{port}/api/me', {{credentials: 'include'}}).then(() => 'read', () => 'blocked')")
     assert blocked == "blocked", blocked
-    cookies = [c for c in ctx.cookies() if c["name"] == "octavarium_session"]
+    cookies = [c for c in ctx.cookies() if c["name"] == "oktavarium_session"]
     assert cookies and cookies[0]["httpOnly"] and cookies[0]["sameSite"] == "Strict"
     assert cookies[0]["domain"] in ("localhost",), cookies[0]
     site.screenshot(path=f"{OUT}/5-site.png")

@@ -55,12 +55,12 @@ defmodule Oktavarium.Directory do
     end)
   end
 
-  @doc "Publiczna tożsamość po uchwycie albo id; `nil`, gdy jej nie ma."
+  @doc "Tożsamość po uchwycie albo id, również `unlisted`; `nil` dla nieznanej."
   @spec get_identity(String.t()) :: %Identity{} | nil
   def get_identity(ref) when is_binary(ref) do
     Repo.one(
       from i in Identity,
-        where: i.visibility == ^:public and (i.handle == ^ref or i.id == ^ref)
+        where: i.handle == ^ref or i.id == ^ref
     )
   end
 
@@ -123,7 +123,7 @@ defmodule Oktavarium.Directory do
   @doc """
   Plik strony tożsamości o uchwycie `handle`: ścieżka względna do `site/`
   (`"index.html"`, `"css/a.css"`). `{:ok, %{hash, media_type, size}}` albo `:error`.
-  Tylko tożsamości publiczne.
+  Także `unlisted`: kto zna adres strony, może ją otworzyć.
   """
   @spec site_file(String.t(), String.t()) :: {:ok, map()} | :error
   def site_file(handle, relative) when is_binary(handle) and is_binary(relative) do
@@ -133,7 +133,7 @@ defmodule Oktavarium.Directory do
           join: i in Identity,
           on: i.id == r.identity_id,
           where:
-            i.handle == ^handle and i.visibility == ^:public and r.kind == ^:site and
+            i.handle == ^handle and r.kind == ^:site and
               r.path == ^("site/" <> relative),
           select: %{hash: r.hash, media_type: r.media_type, size: r.size}
       )
@@ -148,14 +148,14 @@ defmodule Oktavarium.Directory do
         from r in Resource, where: r.identity_id == ^id and r.path == "site/index.html"
       )
 
-  @doc "Blob dostępny publicznie: `hash` użyty przez zasób obrazu albo audio publicznej tożsamości."
+  @doc "Blob obrazu/nagrania dostępny pod bezpośrednim adresem, także z tożsamości `unlisted`."
   @spec public_media(String.t()) :: map() | nil
   def public_media(hash) do
     Repo.one(
       from r in Resource,
         join: i in Identity,
         on: i.id == r.identity_id,
-        where: r.hash == ^hash and r.kind in [:image, :audio] and i.visibility == ^:public,
+        where: r.hash == ^hash and r.kind in [:image, :audio],
         limit: 1,
         select: %{hash: r.hash, media_type: r.media_type, size: r.size}
     )

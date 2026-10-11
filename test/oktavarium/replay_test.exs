@@ -87,7 +87,7 @@ defmodule Oktavarium.ReplayTest do
       ids = event_ids(a.id)
 
       # `events` trzyma klucze obce, więc zamiast kasować projekcję rozbieżność robimy przez ręczne zmiany
-      Repo.update_all(Identity, set: [handle: nil, kind: :org, visibility: :restricted])
+      Repo.update_all(Identity, set: [handle: nil, kind: :collective, visibility: :unlisted])
 
       assert {:ok, %{applied?: true}} = Replay.run(apply: true)
       assert Replay.snapshot() == good
@@ -96,12 +96,28 @@ defmodule Oktavarium.ReplayTest do
 
     test "ręczna zmiana spoza dzienników jest rozbieżnością" do
       %{a: a} = populate!()
-      Repo.update_all(from(i in Identity, where: i.id == ^a.id), set: [visibility: :restricted])
+      Repo.update_all(from(i in Identity, where: i.id == ^a.id), set: [visibility: :unlisted])
 
       assert {:ok, %{in_sync?: false, drift: %{identities: %{changed: [{id, [:visibility]}]}}}} =
                Replay.run()
 
       assert id == a.id
+    end
+
+    test "przy odbudowie przywraca widoczność zmienioną podpisanym zdarzeniem" do
+      a = found!(handle: "alfa")
+      a = next!(a, "identity.visibility.set", %{"visibility" => "unlisted"})
+      assert Repo.get!(Identity, a.id).visibility == :unlisted
+
+      Repo.update_all(from(i in Identity, where: i.id == ^a.id), set: [visibility: :public])
+
+      assert {:ok, %{in_sync?: false, drift: %{identities: %{changed: [{id, [:visibility]}]}}}} =
+               Replay.run()
+
+      assert id == a.id
+      assert {:ok, %{applied?: true}} = Replay.run(apply: true)
+      assert Repo.get!(Identity, a.id).visibility == :unlisted
+      assert {:ok, %{in_sync?: true}} = Replay.run()
     end
 
     test "zachowuje czas przyjęcia zdarzeń i wierszy" do

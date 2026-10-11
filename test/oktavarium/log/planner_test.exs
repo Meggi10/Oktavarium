@@ -24,7 +24,7 @@ defmodule Oktavarium.Log.PlannerTest do
     setup do
       founder = kp()
       auth = kp()
-      body = %{"kind" => "user", "handle" => "pelagia", "auth_keys" => [id(auth)]}
+      body = %{"kind" => "person", "handle" => "pelagia", "auth_keys" => [id(auth)]}
       {envelope, event} = founder |> then(&Envelope.genesis(body, &1)) |> verified()
       {:ok, founder: founder, auth: auth, body: body, envelope: envelope, event: event}
     end
@@ -46,9 +46,10 @@ defmodule Oktavarium.Log.PlannerTest do
 
       assert [identity] = op(ops, :identity)
       assert identity.id == ctx.event.id
-      assert identity.kind == :user
+      assert identity.kind == :person
       assert identity.handle == "pelagia"
-      assert identity.parent_id == nil
+      assert identity.visibility == :public
+      refute Map.has_key?(identity, :parent_id)
 
       [signing, auth] = op(ops, :key)
       assert signing.id == id(ctx.founder)
@@ -83,6 +84,25 @@ defmodule Oktavarium.Log.PlannerTest do
       {envelope, event} = genesis_without(ctx, "handle")
       assert {:ok, ops} = Planner.plan(envelope, event, %Facts{})
       assert [%{handle: nil}] = op(ops, :identity)
+    end
+
+    test "genesis może być nieindeksowany; nie przyjmuje starych rodzajów i widoczności", ctx do
+      {e, ev} = genesis_with(ctx, %{"kind" => "collective", "visibility" => "unlisted"})
+      assert {:ok, ops} = Planner.plan(e, ev, %Facts{})
+      assert [%{kind: :collective, visibility: :unlisted}] = op(ops, :identity)
+
+      for old_kind <- ~w(user org bot project) do
+        {e, ev} = genesis_with(ctx, %{"kind" => old_kind})
+        assert {:error, {:invalid_body, "kind"}} = Planner.plan(e, ev, %Facts{})
+      end
+
+      for invalid <- ["restricted", "secret", nil, 10, true] do
+        {e, ev} = genesis_with(ctx, %{"visibility" => invalid})
+        assert {:error, {:invalid_body, "visibility"}} = Planner.plan(e, ev, %Facts{})
+      end
+
+      {e, ev} = genesis_with(ctx, %{"parent_id" => ctx.event.id})
+      assert {:error, {:invalid_body, "parent_id"}} = Planner.plan(e, ev, %Facts{})
     end
 
     test "istniejący klucz autoryzacji jest współdzielony, a nie tworzony ponownie", ctx do
@@ -130,7 +150,7 @@ defmodule Oktavarium.Log.PlannerTest do
     end
 
     test "niepoprawny rodzaj", ctx do
-      for bad <- ["admin", "", 5, nil, ["user"]] do
+      for bad <- ["admin", "", 5, nil, ["person"]] do
         {e, ev} = genesis_with(ctx, %{"kind" => bad})
         assert {:error, {:invalid_body, "kind"}} = Planner.plan(e, ev, %Facts{}), inspect(bad)
       end
@@ -184,7 +204,7 @@ defmodule Oktavarium.Log.PlannerTest do
 
       {_g, genesis} =
         founder
-        |> then(&Envelope.genesis(%{"kind" => "user", "auth_keys" => [id(kp())]}, &1))
+        |> then(&Envelope.genesis(%{"kind" => "person", "auth_keys" => [id(kp())]}, &1))
         |> verified()
 
       facts = %Facts{
@@ -459,7 +479,7 @@ defmodule Oktavarium.Log.PlannerTest do
 
       {_g, genesis} =
         founder
-        |> then(&Envelope.genesis(%{"kind" => "user", "auth_keys" => [id(kp())]}, &1))
+        |> then(&Envelope.genesis(%{"kind" => "person", "auth_keys" => [id(kp())]}, &1))
         |> verified()
 
       grant_id = Crypto.encode(:crypto.strong_rand_bytes(32))
@@ -635,6 +655,7 @@ defmodule Oktavarium.Log.PlannerTest do
 
     test "profile.update jest na liście obsługiwanych typów" do
       assert "profile.update" in Planner.supported_types()
+      assert "identity.visibility.set" in Planner.supported_types()
     end
   end
 end

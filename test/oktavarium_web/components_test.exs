@@ -34,11 +34,10 @@ defmodule OktavariumWeb.ComponentsTest do
   end
 
   test "kind_name/1" do
-    assert kind_name(:user) == "użytkownik"
-    assert kind_name("org") == "organizacja"
-    assert kind_name(:project) == "projekt"
-    assert kind_name("project") == "projekt"
-    assert kind_name(:bot) == "maszyna"
+    assert kind_name(:person) == "osoba"
+    assert kind_name("person") == "osoba"
+    assert kind_name(:collective) == "kolektyw"
+    assert kind_name("collective") == "kolektyw"
     assert kind_name(:cokolwiek) == "tożsamość"
   end
 end

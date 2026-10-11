@@ -90,17 +90,20 @@ defmodule Oktavarium.Cli do
   @doc """
   Podpisuje zdarzenie genesis, które zakłada tożsamość.
 
-  Opcje: `:kind` (wymagana), `:handle`, `:auth_keys` (lista id kluczy autoryzacji).
+  Opcje: `:kind` (wymagana), `:visibility` (public/unlisted), `:handle`,
+  `:auth_keys` (lista id kluczy autoryzacji).
   Podpisuje klucz `:signing` z `key_path`; staje się on kluczem założycielskim.
   """
   @spec create_identity(Path.t(), keyword()) :: result()
   def create_identity(key_path, opts) do
     with {:ok, key} <- load_signing_key(key_path),
          {:ok, kind} <- identity_kind(opts[:kind]),
+         {:ok, visibility} <- identity_visibility(opts[:visibility]),
          {:ok, handle} <- identity_handle(opts[:handle]),
          {:ok, auth_keys} <- validate_key_ids(Keyword.get(opts, :auth_keys, [])) do
       body =
         %{"kind" => Atom.to_string(kind)}
+        |> put_unless_nil("visibility", visibility)
         |> put_unless_nil("handle", handle)
         |> put_unless_empty("auth_keys", auth_keys)
 
@@ -452,6 +455,15 @@ defmodule Oktavarium.Cli do
   defp parse_key_kind("signing"), do: {:ok, :signing}
   defp parse_key_kind("auth"), do: {:ok, :auth}
   defp parse_key_kind(value), do: {:error, {:invalid_option, :kind, value}}
+
+  defp identity_visibility(nil), do: {:ok, nil}
+
+  defp identity_visibility(value) do
+    case Rules.parse_visibility(value) do
+      {:ok, visibility} -> {:ok, Atom.to_string(visibility)}
+      :error -> {:error, {:invalid_option, :visibility, value}}
+    end
+  end
 
   defp identity_kind(nil), do: {:error, {:missing_option, :kind}}
 

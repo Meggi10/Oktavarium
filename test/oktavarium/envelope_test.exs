@@ -9,7 +9,7 @@ defmodule Oktavarium.EnvelopeTest do
 
   describe "genesis" do
     test "tworzy tożsamość o identyfikatorze równym skrótowi zdarzenia", %{kp: kp} do
-      env = Envelope.genesis(%{"kind" => "user", "handle" => "pelagia"}, kp)
+      env = Envelope.genesis(%{"kind" => "person", "handle" => "pelagia"}, kp)
 
       assert {:ok, event} = Envelope.verify(env)
       assert event.genesis?
@@ -19,16 +19,16 @@ defmodule Oktavarium.EnvelopeTest do
       assert event.identity == event.id
       assert event.id == Envelope.id(env)
       assert event.signer == Crypto.key_id(kp.public)
-      assert event.body == %{"kind" => "user", "handle" => "pelagia"}
+      assert event.body == %{"kind" => "person", "handle" => "pelagia"}
     end
 
     test "identyfikator zależy od treści i klucza założycielskiego", %{kp: kp} do
       other = Crypto.generate_keypair()
-      attrs = %{type: "identity.genesis", seq: 0, body: %{"kind" => "user"}, ts: 1_700_000_000}
+      attrs = %{type: "identity.genesis", seq: 0, body: %{"kind" => "person"}, ts: 1_700_000_000}
 
       a = Envelope.sign(attrs, kp)
       same = Envelope.sign(attrs, kp)
-      other_body = Envelope.sign(%{attrs | body: %{"kind" => "org"}}, kp)
+      other_body = Envelope.sign(%{attrs | body: %{"kind" => "collective"}}, kp)
       other_key = Envelope.sign(attrs, other)
 
       # deterministyczne: ten sam klucz i ładunek dają ten sam identyfikator
@@ -47,7 +47,7 @@ defmodule Oktavarium.EnvelopeTest do
 
   describe "zdarzenia zwykłe" do
     test "łańcuch: kolejne zdarzenie wskazuje tożsamość i poprzednika", %{kp: kp} do
-      genesis = Envelope.genesis(%{"kind" => "project"}, kp)
+      genesis = Envelope.genesis(%{"kind" => "collective"}, kp)
       identity = Envelope.id(genesis)
 
       env =
@@ -80,19 +80,19 @@ defmodule Oktavarium.EnvelopeTest do
 
   describe "integralność" do
     test "zmiana ładunku unieważnia podpis", %{kp: kp} do
-      env = Envelope.genesis(%{"kind" => "user"}, kp)
-      tampered = %{env | payload: String.replace(env.payload, "user", "admn")}
+      env = Envelope.genesis(%{"kind" => "person"}, kp)
+      tampered = %{env | payload: String.replace(env.payload, "person", "admn")}
       assert Envelope.verify(tampered) == {:error, :bad_signature}
     end
 
     test "podmiana klucza podpisującego unieważnia podpis", %{kp: kp} do
-      env = Envelope.genesis(%{"kind" => "user"}, kp)
+      env = Envelope.genesis(%{"kind" => "person"}, kp)
       other = Crypto.generate_keypair()
       assert Envelope.verify(%{env | signer: other.public}) == {:error, :bad_signature}
     end
 
     test "podpis pod inną domeną nie jest akceptowany jako podpis zdarzenia", %{kp: kp} do
-      env = Envelope.genesis(%{"kind" => "user"}, kp)
+      env = Envelope.genesis(%{"kind" => "person"}, kp)
       forged = %{env | signature: Crypto.sign(:login, env.payload, kp.private)}
       assert Envelope.verify(forged) == {:error, :bad_signature}
     end
@@ -156,7 +156,7 @@ defmodule Oktavarium.EnvelopeTest do
 
   describe "postać sieciowa" do
     test "to_map/from_map przez JSON zachowuje podpisane bajty", %{kp: kp} do
-      env = Envelope.genesis(%{"kind" => "user", "handle" => "zażółć"}, kp)
+      env = Envelope.genesis(%{"kind" => "person", "handle" => "zażółć"}, kp)
 
       wire = env |> Envelope.to_map() |> Jason.encode!() |> Jason.decode!()
       assert {:ok, decoded} = Envelope.from_map(wire)

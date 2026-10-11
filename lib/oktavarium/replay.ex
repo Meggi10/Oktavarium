@@ -10,7 +10,7 @@ defmodule Oktavarium.Replay do
   alias Oktavarium.Log.Event
 
   @tables [
-    identities: {Identity, [:id, :kind, :handle, :profile, :visibility, :parent_id], [:id]},
+    identities: {Identity, [:id, :kind, :handle, :profile, :visibility], [:id]},
     keys: {Key, [:id, :kind, :algo, :public_key, :status, :home_identity_id], [:id]},
     auth_links:
       {IdentityAuthKey, [:identity_id, :key_id, :status, :added_event_id],
