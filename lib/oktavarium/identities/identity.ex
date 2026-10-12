@@ -14,6 +14,7 @@ defmodule Oktavarium.Identities.Identity do
     field :kind, Ecto.Enum, values: @kinds
     field :handle, :string
     field :profile, :map, default: %{}
+    field :profile_refs, :map, default: %{}
     field :visibility, Ecto.Enum, values: @visibilities, default: :public
     timestamps()
   end
@@ -23,8 +24,8 @@ defmodule Oktavarium.Identities.Identity do
   @doc "Zmienia wyłącznie profil (projekcja zdarzenia `profile.update`)."
   def profile_changeset(identity, attrs) do
     identity
-    |> cast(attrs, [:profile])
-    |> validate_required([:profile])
+    |> cast(attrs, [:profile, :profile_refs])
+    |> validate_required([:profile, :profile_refs])
   end
 
   @doc "Projekcja podpisanej operacji `identity.visibility.set`."
@@ -36,7 +37,7 @@ defmodule Oktavarium.Identities.Identity do
 
   def changeset(identity, attrs) do
     identity
-    |> cast(attrs, [:id, :kind, :handle, :profile, :visibility])
+    |> cast(attrs, [:id, :kind, :handle, :profile, :profile_refs, :visibility])
     |> validate_required([:id, :kind])
     |> validate_format(:handle, Rules.handle_format(),
       message: "dozwolone: a-z, 0-9, _ i -, 2-32 znaki"

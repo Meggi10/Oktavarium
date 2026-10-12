@@ -44,6 +44,19 @@ defmodule Oktavarium.Identities.Profile do
 
   def parse_changes(_other), do: {:error, {:invalid_body, "fields"}}
 
+  # Replay po skasowaniu historycznych bajtów nadal musi sprawdzić nazwę pola
+  # i uprawnienie, choć nie da się już zweryfikować wartości. Brak treści
+  # reprezentuje nil, zaś ref przechowuje oddzielna projekcja profile_refs.
+  def parse_changes_for_replay(changes, true) when is_map(changes) and map_size(changes) > 0 do
+    if Enum.all?(changes, fn {field, value} ->
+         field in fields() and (is_nil(value) or check_value(field, value) == :ok)
+       end),
+       do: {:ok, changes},
+       else: {:error, {:invalid_body, "fields"}}
+  end
+
+  def parse_changes_for_replay(changes, _), do: parse_changes(changes)
+
   @doc "Profil po zastosowaniu zmian: `nil` usuwa pole, pozostałe pola zostają."
   @spec apply_changes(map() | nil, changes()) :: map()
   def apply_changes(profile, changes) do

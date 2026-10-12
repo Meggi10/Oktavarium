@@ -1,7 +1,10 @@
 defmodule Oktavarium.Blobs do
   @moduledoc false
-  alias Oktavarium.{Repo, Resources}
+  import Ecto.Query, only: [from: 2]
+  alias Oktavarium.{Content, Repo, Resources}
   alias Oktavarium.Blobs.Blob
+  alias Oktavarium.Identities.Identity
+  alias Oktavarium.Resources.Resource
 
   @text_types ~w(text/html text/css text/javascript text/plain application/json image/svg+xml)
 
@@ -39,7 +42,57 @@ defmodule Oktavarium.Blobs do
   def get(hash) when is_binary(hash), do: Repo.get(Blob, hash)
   def get(_other), do: nil
 
-  @doc "Czy plik bloba faktycznie leży na dysku."
+  @doc "Czyta krótką treść UTF-8 po skrócie albo zwraca :missing."
+  @spec read_text(String.t()) :: {:ok, String.t()} | :missing
+  def read_text(hash) do
+    with %Blob{size: size} when size <= 10_000 <- get(hash),
+         {:ok, file} <- path(hash),
+         {:ok, bytes} <- File.read(file),
+         true <- String.valid?(bytes) and byte_size(bytes) <= 10_000,
+         true <- Content.hash(bytes) == hash do
+      {:ok, bytes}
+    else
+      _ -> :missing
+    end
+  end
+
+  @doc """
+  Usuwa nieużywane bajty (GC operatora, nie publiczny endpoint).
+  W pierwszej kolejności trzeba podpisać zmianę/usunięcie referencji.
+  Skróty historyczne pozostają w niezmiennym dzienniku. Funkcja odmawia
+  usunięcia bloba wskazywanego przez dowolną AKTUALNĄ projekcję.
+  """
+  @spec prune_orphan(String.t()) :: :ok | {:error, atom()}
+  def prune_orphan(hash) do
+    with true <- Resources.valid_hash?(hash),
+         false <- currently_referenced?(hash),
+         {:ok, file} <- path(hash) do
+      case File.rm(file) do
+        :ok -> Repo.delete_all(from b in Blob, where: b.hash == ^hash)
+        {:error, :enoent} -> Repo.delete_all(from b in Blob, where: b.hash == ^hash)
+        {:error, _} -> :error
+      end
+      |> case do
+        :error -> {:error, :storage}
+        _ -> :ok
+      end
+    else
+      false -> {:error, :invalid_hash}
+      true -> {:error, :in_use}
+      _ -> {:error, :invalid_hash}
+    end
+  end
+
+  defp currently_referenced?(hash) do
+    Repo.exists?(from r in Resource, where: r.hash == ^hash) or
+      Enum.any?(Repo.all(from i in Identity, select: i.profile_refs), fn refs ->
+        hash in Map.values(refs || %{})
+      end) or
+      Enum.any?(Repo.all(from r in Resource, select: r.meta_refs), fn refs ->
+        hash in Map.values(refs || %{})
+      end)
+  end
+
   @spec exists?(String.t()) :: boolean()
   def exists?(hash) do
     case path(hash) do

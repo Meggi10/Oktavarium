@@ -112,7 +112,7 @@ defmodule Oktavarium.EnvelopeTest do
 
       payload =
         Jason.encode!(%{
-          "v" => 1,
+          "v" => 2,
           "signer" => Crypto.key_id(other.public),
           "type" => "x",
           "seq" => 1,
@@ -130,19 +130,19 @@ defmodule Oktavarium.EnvelopeTest do
     end
 
     test "nieobsługiwana wersja", %{kp: kp} do
-      payload = Jason.encode!(%{"v" => 2, "type" => "x", "seq" => 0, "body" => %{}, "ts" => 1})
+      payload = Jason.encode!(%{"v" => 3, "type" => "x", "seq" => 0, "body" => %{}, "ts" => 1})
       assert Envelope.verify(signed(payload, kp)) == {:error, :unsupported_version}
     end
 
     test "brakujące pola", %{kp: kp} do
-      payload = Jason.encode!(%{"v" => 1, "type" => "x"})
+      payload = Jason.encode!(%{"v" => 2, "type" => "x"})
       assert Envelope.verify(signed(payload, kp)) == {:error, :invalid_payload}
     end
 
     test "zły typ pola identity", %{kp: kp} do
       payload =
         Jason.encode!(%{
-          "v" => 1,
+          "v" => 2,
           "type" => "x",
           "seq" => 1,
           "body" => %{},

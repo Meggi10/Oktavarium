@@ -6,9 +6,10 @@ defmodule OktavariumWeb.ApiError do
   @forbidden ~w(not_authorized unknown_signer not_signing_key key_revoked parent_not_delegable
                 grant_inactive broken_chain registration_closed invalid_csrf invalid_invite)a
   @conflict ~w(duplicate_event bad_seq bad_prev handle_taken signing_key_already_registered conflict
-               already_revoked already_member)a
+               already_revoked already_member project_slug_taken resource_path_taken
+               resource_kind_mismatch project_not_empty)a
   @unauthorized ~w(unauthenticated invalid_challenge bad_signature unknown_key)a
-  @not_found ~w(unknown_identity unknown_resource unknown_grant blob_not_found)a
+  @not_found ~w(unknown_identity unknown_resource unknown_project unknown_grant blob_not_found)a
 
   @spec send(Plug.Conn.t(), term()) :: Plug.Conn.t()
   def send(conn, reason) do

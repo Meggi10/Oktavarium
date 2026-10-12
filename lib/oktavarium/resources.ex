@@ -1,6 +1,7 @@
 defmodule Oktavarium.Resources do
   @moduledoc false
   @type kind :: :image | :audio | :site
+  alias Oktavarium.Crypto
 
   @images ~w(image/png image/jpeg image/gif image/webp)
   @audio ~w(audio/mpeg audio/ogg audio/wav audio/flac audio/mp4)
@@ -13,8 +14,12 @@ defmodule Oktavarium.Resources do
   def put_action, do: "resource.put"
   def delete_action, do: "resource.delete"
 
-  @doc "Zasób w sensie uprawnień: `<id>/<ścieżka>`."
-  def resource(identity_id, path), do: identity_id <> "/" <> path
+  @doc "Zasób w sensie uprawnień. Projekty mają odizolowaną przestrzeń ścieżek."
+  def resource(identity_id, path), do: resource(identity_id, path, nil)
+  def resource(identity_id, path, nil), do: identity_id <> "/" <> path
+
+  def resource(identity_id, path, project_id) when is_binary(project_id),
+    do: identity_id <> "/projects/" <> project_id <> "/" <> path
 
   @doc "Dozwolone typy mediów dla rodzaju."
   @spec media_types(kind()) :: [String.t()]
@@ -63,19 +68,36 @@ defmodule Oktavarium.Resources do
   def valid_hash?(hash) when is_binary(hash), do: Regex.match?(~r/\A[0-9a-f]{64}\z/, hash)
   def valid_hash?(_other), do: false
 
+  @doc "Kanoniczny identyfikator zasobu: SHA-256 zakodowany jako base64url (43 znaki)."
+  def valid_id?(id) when is_binary(id) do
+    case Crypto.decode(id) do
+      {:ok, <<_::binary-size(32)>> = bytes} -> Crypto.encode(bytes) == id
+      _ -> false
+    end
+  end
+
+  def valid_id?(_other), do: false
+
   @doc """
-  Waliduje ciało `resource.put`. Zwraca `{:ok, %{path, kind, hash, size, media_type, meta}}`
-  albo `{:error, {:invalid_body, pole}}`.
+  Waliduje `resource.put`. `id` wskazuje istniejący zasób (także po zmianie ścieżki),
+  `project_id` opcjonalnie przypisuje go do projektu. Brak `project_id` oznacza
+  zachowanie obecnej przynależności podczas aktualizacji.
+  Zwraca `{:ok, dane}` lub `{:error, {:invalid_body, pole}}`.
   """
   @spec parse_put(term()) :: {:ok, map()} | {:error, {:invalid_body, String.t()}}
   def parse_put(body) when is_map(body) do
     with {:ok, kind, path} <- field(parse_path(Map.get(body, "path")), "path"),
+         :ok <- optional_id(body, "id"),
+         :ok <- optional_project_id(body),
          :ok <- ensure(valid_hash?(Map.get(body, "hash")), "hash"),
          {:ok, size} <- parse_size(Map.get(body, "size"), kind),
          {:ok, media_type} <- parse_media_type(Map.get(body, "media_type"), kind),
          {:ok, meta} <- parse_meta(Map.get(body, "meta", %{})) do
       {:ok,
        %{
+         id: body["id"],
+         project_id:
+           if(Map.has_key?(body, "project_id"), do: body["project_id"], else: :unchanged),
          path: path,
          kind: kind,
          hash: body["hash"],
@@ -88,16 +110,45 @@ defmodule Oktavarium.Resources do
 
   def parse_put(_body), do: {:error, {:invalid_body, "body"}}
 
-  @doc "Waliduje ciało `resource.delete`: `{:ok, path}`."
-  @spec parse_delete(term()) :: {:ok, String.t()} | {:error, {:invalid_body, String.t()}}
+  @doc "Kasowanie po `id` albo po ścieżce wewnątrz root/projektu (`project_id`)."
+  @spec parse_delete(term()) :: {:ok, map()} | {:error, {:invalid_body, String.t()}}
   def parse_delete(body) when is_map(body) do
-    case parse_path(Map.get(body, "path")) do
-      {:ok, _kind, path} -> {:ok, path}
-      :error -> {:error, {:invalid_body, "path"}}
+    id = Map.get(body, "id")
+    path = Map.get(body, "path")
+
+    cond do
+      optional_project_id(body) != :ok ->
+        {:error, {:invalid_body, "project_id"}}
+
+      Map.has_key?(body, "id") and not valid_id?(id) ->
+        {:error, {:invalid_body, "id"}}
+
+      Map.has_key?(body, "path") and not match?({:ok, _, _}, parse_path(path)) ->
+        {:error, {:invalid_body, "path"}}
+
+      is_nil(id) and is_nil(path) ->
+        {:error, {:invalid_body, "id"}}
+
+      true ->
+        {:ok, %{id: id, path: path, project_id: Map.get(body, "project_id")}}
     end
   end
 
   def parse_delete(_body), do: {:error, {:invalid_body, "body"}}
+
+  defp optional_id(body, field) do
+    if not Map.has_key?(body, field) or valid_id?(Map.get(body, field)),
+      do: :ok,
+      else: {:error, {:invalid_body, field}}
+  end
+
+  defp optional_project_id(body) do
+    value = Map.get(body, "project_id")
+
+    if not Map.has_key?(body, "project_id") or is_nil(value) or valid_id?(value),
+      do: :ok,
+      else: {:error, {:invalid_body, "project_id"}}
+  end
 
   defp field({:ok, kind, path}, _name), do: {:ok, kind, path}
   defp field(:error, name), do: {:error, {:invalid_body, name}}
@@ -117,7 +168,8 @@ defmodule Oktavarium.Resources do
 
   defp parse_media_type(_type, _kind), do: {:error, {:invalid_body, "media_type"}}
 
-  defp parse_meta(meta) when is_map(meta) and not is_struct(meta) do
+  @doc false
+  def parse_meta(meta) when is_map(meta) and not is_struct(meta) do
     Enum.reduce_while(Enum.sort(meta), {:ok, %{}}, fn {key, value}, {:ok, acc} ->
       with {:ok, limit} <- Map.fetch(@meta_limits, key),
            true <- meta_text?(value, key, limit) do
@@ -128,7 +180,7 @@ defmodule Oktavarium.Resources do
     end)
   end
 
-  defp parse_meta(_meta), do: {:error, {:invalid_body, "meta"}}
+  def parse_meta(_meta), do: {:error, {:invalid_body, "meta"}}
 
   defp meta_text?(value, key, limit) when is_binary(value) do
     value != "" and String.valid?(value) and String.length(value) <= limit and

@@ -10,7 +10,7 @@ defmodule Oktavarium.Replay do
   alias Oktavarium.Log.Event
 
   @tables [
-    identities: {Identity, [:id, :kind, :handle, :profile, :visibility], [:id]},
+    identities: {Identity, [:id, :kind, :handle, :profile, :profile_refs, :visibility], [:id]},
     keys: {Key, [:id, :kind, :algo, :public_key, :status, :home_identity_id], [:id]},
     auth_links:
       {IdentityAuthKey, [:identity_id, :key_id, :status, :added_event_id],
@@ -19,8 +19,20 @@ defmodule Oktavarium.Replay do
       {IdentitySigningKey, [:identity_id, :key_id, :label, :status, :added_event_id],
        [:identity_id, :key_id]},
     resources:
-      {Resource, [:identity_id, :path, :kind, :hash, :size, :media_type, :meta, :event_id],
-       [:identity_id, :path]},
+      {Resource,
+       [
+         :id,
+         :identity_id,
+         :project_id,
+         :path,
+         :kind,
+         :hash,
+         :size,
+         :media_type,
+         :meta,
+         :meta_refs,
+         :event_id
+       ], [:id]},
     grants:
       {Grant,
        [

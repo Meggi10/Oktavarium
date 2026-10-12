@@ -6,6 +6,7 @@ defmodule Oktavarium.Repo.Migrations.CreateIdentities do
       add :kind, :string, null: false
       add :handle, :string
       add :profile, :map, null: false, default: %{}
+      add :profile_refs, :map, null: false, default: %{}
       add :visibility, :string, null: false, default: "public"
 
       timestamps()

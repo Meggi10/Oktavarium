@@ -15,7 +15,11 @@ defmodule Oktavarium.Log.Facts do
           target_key: key_info() | nil,
           member: %{status: :active | :revoked} | nil,
           resource: map() | nil,
+          path_resource: map() | nil,
+          project: map() | nil,
+          project_children?: boolean(),
           auth_count: non_neg_integer(),
+          replaying?: boolean(),
           now: DateTime.t() | nil
         }
 
@@ -31,6 +35,10 @@ defmodule Oktavarium.Log.Facts do
             target_key: nil,
             member: nil,
             resource: nil,
+            path_resource: nil,
+            project: nil,
+            project_children?: false,
             auth_count: 0,
+            replaying?: false,
             now: nil
 end

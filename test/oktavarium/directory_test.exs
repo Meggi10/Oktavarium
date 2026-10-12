@@ -169,7 +169,11 @@ defmodule Oktavarium.DirectoryTest do
       assert Enum.map(entries, & &1.seq) == [4, 3, 2, 1, 0]
       assert hd(entries).type == "profile.update"
       assert hd(entries).signer == key_id(a.founder)
-      assert hd(entries).body == %{"fields" => %{"bio" => "v4"}}
+
+      assert hd(entries).body == %{
+               "fields" => %{"bio" => %{"sha256" => Oktavarium.Content.hash("v4")}}
+             }
+
       assert %DateTime{} = hd(entries).received_at
       assert List.last(entries).type == "identity.genesis"
     end

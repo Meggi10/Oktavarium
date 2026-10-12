@@ -31,11 +31,13 @@ defmodule OktavariumWeb.IdentityApiController do
         kind: identity.kind,
         visibility: identity.visibility,
         profile: identity.profile || %{},
+        profile_refs: identity.profile_refs || %{},
         founding_key: Directory.founding_key_id(identity),
         auth_keys: Directory.auth_keys(identity),
         members: Directory.members(identity),
         grants: Directory.grants(identity) |> Enum.map(&grant/1),
         resources: Directory.resources(identity) |> Enum.map(&resource/1),
+        projects: Directory.projects(identity) |> Enum.map(&project/1),
         site_url:
           if(Directory.has_site?(identity), do: OktavariumWeb.SitePlug.site_url(identity.handle)),
         head: %{seq: head.seq, id: head.id}
@@ -65,12 +67,24 @@ defmodule OktavariumWeb.IdentityApiController do
 
   defp resource(r) do
     %{
+      id: r.id,
+      project_id: r.project_id,
       path: r.path,
       kind: r.kind,
       hash: r.hash,
       size: r.size,
       media_type: r.media_type,
-      meta: r.meta
+      meta: r.meta,
+      meta_refs: r.meta_refs
+    }
+  end
+
+  defp project(p) do
+    %{
+      id: p.id,
+      slug: String.replace_prefix(p.path, "projects/", ""),
+      meta: p.meta,
+      meta_refs: p.meta_refs
     }
   end
 

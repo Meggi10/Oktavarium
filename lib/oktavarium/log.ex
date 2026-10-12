@@ -2,7 +2,7 @@ defmodule Oktavarium.Log do
   @moduledoc false
   import Ecto.Query, only: [from: 2]
 
-  alias Oktavarium.{Crypto, Envelope, Repo}
+  alias Oktavarium.{Blobs, Crypto, Envelope, Projects, Repo, Resources}
   alias Oktavarium.Grants.Grant
   alias Oktavarium.Identities.Identity
   alias Oktavarium.Keys.{IdentityAuthKey, IdentitySigningKey, Key}
@@ -21,11 +21,28 @@ defmodule Oktavarium.Log do
     Repo.transaction(fn ->
       case plan_verified(envelope, event, nil) do
         {:ok, ops} ->
-          apply_ops(ops, nil)
-          event
+          # Załączniki nie trafiają do dziennika. Po walidacji planu zapisujemy
+          # je jako treści adresowane skrótem, w tej samej transakcji SQL.
+          case store_attachments(envelope.attachments) do
+            :ok ->
+              apply_ops(ops, nil)
+              event
+
+            {:error, reason} ->
+              Repo.rollback(reason)
+          end
 
         {:error, reason} ->
           Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp store_attachments(attachments) do
+    Enum.reduce_while(attachments, :ok, fn {_hash, text}, :ok ->
+      case Blobs.put(text, "text/plain") do
+        {:ok, _} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
@@ -185,6 +202,7 @@ defmodule Oktavarium.Log do
       signer_key: key_info(event.signer),
       subject_key: key_info(event.body["subject"]),
       grants: grants_of(event.identity),
+      replaying?: not is_nil(now),
       now: now || DateTime.utc_now()
     }
     |> type_facts(event)
@@ -219,9 +237,55 @@ defmodule Oktavarium.Log do
     %{facts | target_key: key_info(key_id), member: member, auth_count: count}
   end
 
-  defp type_facts(facts, %{type: type, body: body, identity: identity})
-       when type in ["resource.put", "resource.delete"] do
-    %{facts | resource: resource_info(identity, body["path"])}
+  defp type_facts(facts, %{type: "resource.put", body: body, identity: identity}) do
+    # Id rozstrzyga niejednoznaczność przy przenoszeniu między projektami.
+    current =
+      if Resources.valid_id?(body["id"]),
+        do: resource_info_id(identity, body["id"]),
+        else: resource_info_path(identity, body["path"], body["project_id"])
+
+    scope =
+      if Map.has_key?(body, "project_id"),
+        do: body["project_id"],
+        else: if(current, do: current.project_id, else: nil)
+
+    %{
+      facts
+      | resource: current,
+        path_resource: resource_info_path(identity, body["path"], scope),
+        project: resource_info_id(identity, body["project_id"])
+    }
+  end
+
+  defp type_facts(facts, %{type: "resource.delete", body: body, identity: identity}) do
+    current =
+      if Resources.valid_id?(body["id"]),
+        do: resource_info_id(identity, body["id"]),
+        else: resource_info_path(identity, body["path"], body["project_id"])
+
+    %{facts | resource: current}
+  end
+
+  defp type_facts(facts, %{type: "project.create", body: body, identity: identity}) do
+    path = if is_binary(body["slug"]), do: Projects.path(body["slug"]), else: nil
+    %{facts | path_resource: resource_info_path(identity, path, nil)}
+  end
+
+  defp type_facts(facts, %{type: "project.update", body: body, identity: identity}) do
+    project = resource_info_id(identity, body["id"])
+    path = if is_binary(body["slug"]), do: Projects.path(body["slug"]), else: nil
+    %{facts | project: project, path_resource: resource_info_path(identity, path, nil)}
+  end
+
+  defp type_facts(facts, %{type: "project.delete", body: body, identity: identity}) do
+    project = resource_info_id(identity, body["id"])
+
+    children? =
+      if project && project.kind == :project,
+        do: Repo.exists?(from r in Resource, where: r.project_id == ^project.id),
+        else: false
+
+    %{facts | project: project, project_children?: children?}
   end
 
   defp type_facts(facts, _event), do: facts
@@ -236,15 +300,34 @@ defmodule Oktavarium.Log do
 
   defp member_info(_identity_id, _key_id), do: nil
 
-  defp resource_info(identity_id, path) when is_binary(path),
-    do:
-      Repo.one(
-        from r in Resource,
-          where: r.identity_id == ^identity_id and r.path == ^path,
-          select: %{kind: r.kind, hash: r.hash}
-      )
+  defp resource_info_path(identity_id, path, nil) when is_binary(path) do
+    Repo.one(
+      from r in Resource,
+        where: r.identity_id == ^identity_id and r.path == ^path and is_nil(r.project_id),
+        select: map(r, [:id, :identity_id, :path, :kind, :project_id, :hash, :meta, :meta_refs])
+    )
+  end
 
-  defp resource_info(_identity_id, _path), do: nil
+  defp resource_info_path(identity_id, path, project_id)
+       when is_binary(path) and is_binary(project_id) do
+    Repo.one(
+      from r in Resource,
+        where: r.identity_id == ^identity_id and r.path == ^path and r.project_id == ^project_id,
+        select: map(r, [:id, :identity_id, :path, :kind, :project_id, :hash, :meta, :meta_refs])
+    )
+  end
+
+  defp resource_info_path(_identity_id, _path, _project_id), do: nil
+
+  defp resource_info_id(identity_id, id) when is_binary(id) do
+    Repo.one(
+      from r in Resource,
+        where: r.identity_id == ^identity_id and r.id == ^id,
+        select: map(r, [:id, :identity_id, :path, :kind, :project_id, :hash, :meta, :meta_refs])
+    )
+  end
+
+  defp resource_info_id(_identity_id, _id), do: nil
 
   defp grants_of(identity_id) do
     Repo.all(
@@ -273,7 +356,12 @@ defmodule Oktavarium.Log do
   defp handle_taken?(_other), do: false
 
   defp identity_info(id) when is_binary(id),
-    do: Repo.one(from i in Identity, where: i.id == ^id, select: %{id: i.id, profile: i.profile})
+    do:
+      Repo.one(
+        from i in Identity,
+          where: i.id == ^id,
+          select: %{id: i.id, profile: i.profile, profile_refs: i.profile_refs}
+      )
 
   defp latest_event(identity_id) do
     Repo.one(
@@ -332,12 +420,12 @@ defmodule Oktavarium.Log do
     end
   end
 
-  defp apply_op({:profile, %{identity_id: id, profile: profile}}, at) do
+  defp apply_op({:profile, %{identity_id: id, profile: profile, profile_refs: refs}}, at) do
     identity = Repo.get!(Identity, id)
 
     changeset =
       identity
-      |> Identity.profile_changeset(%{profile: profile})
+      |> Identity.profile_changeset(%{profile: profile, profile_refs: refs})
       |> stamp([:updated_at], at)
 
     case Repo.update(changeset) do
@@ -419,7 +507,7 @@ defmodule Oktavarium.Log do
   end
 
   defp apply_op({:resource, attrs}, at) do
-    case Repo.get_by(Resource, identity_id: attrs.identity_id, path: attrs.path) do
+    case Repo.get(Resource, attrs.id) do
       nil ->
         insert!(Resource, attrs, at)
 
@@ -433,8 +521,8 @@ defmodule Oktavarium.Log do
     end
   end
 
-  defp apply_op({:resource_delete, %{identity_id: identity_id, path: path}}, _at) do
-    Repo.delete_all(from r in Resource, where: r.identity_id == ^identity_id and r.path == ^path)
+  defp apply_op({:resource_delete, %{id: id}}, _at) do
+    Repo.delete_all(from r in Resource, where: r.id == ^id)
     :ok
   end
 

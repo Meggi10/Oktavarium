@@ -748,8 +748,11 @@ defmodule Oktavarium.LogTest do
 
       assert [_, _, %Envelope{} = last] = Log.envelopes(ctx.pelagia.id)
 
-      assert {:ok, %{type: "profile.update", body: %{"fields" => %{"bio" => "x"}}}} =
+      assert {:ok,
+              %{type: "profile.update", body: %{"fields" => %{"bio" => %{"sha256" => digest}}}}} =
                Envelope.verify(last)
+
+      assert digest == Oktavarium.Content.hash("x")
     end
   end
 

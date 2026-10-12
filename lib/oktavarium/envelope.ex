@@ -1,16 +1,17 @@
 defmodule Oktavarium.Envelope do
   @moduledoc false
-  alias Oktavarium.Crypto
-  @version 1
+  alias Oktavarium.{Content, Crypto}
+  @version 2
   @genesis_type "identity.genesis"
 
   @enforce_keys [:payload, :signer, :signature]
-  defstruct [:payload, :signer, :signature]
+  defstruct [:payload, :signer, :signature, attachments: %{}]
 
   @type t :: %__MODULE__{
           payload: binary(),
           signer: binary(),
-          signature: binary()
+          signature: binary(),
+          attachments: %{optional(String.t()) => String.t()}
         }
 
   @type event :: %{
@@ -37,6 +38,8 @@ defmodule Oktavarium.Envelope do
   """
   @spec sign(map(), Crypto.keypair()) :: t()
   def sign(attrs, %{public: public, private: private}) when is_map(attrs) do
+    {body, attachments} = Content.detach(Map.fetch!(attrs, :type), Map.get(attrs, :body, %{}))
+
     payload =
       %{
         "v" => @version,
@@ -47,7 +50,7 @@ defmodule Oktavarium.Envelope do
         "seq" => Map.fetch!(attrs, :seq),
         "prev" => Map.get(attrs, :prev),
         "type" => Map.fetch!(attrs, :type),
-        "body" => Map.get(attrs, :body, %{}),
+        "body" => body,
         "ts" => Map.get_lazy(attrs, :ts, fn -> System.system_time(:second) end)
       }
       |> Jason.encode!()
@@ -55,7 +58,8 @@ defmodule Oktavarium.Envelope do
     %__MODULE__{
       payload: payload,
       signer: public,
-      signature: Crypto.sign(:event, payload, private)
+      signature: Crypto.sign(:event, payload, private),
+      attachments: attachments
     }
   end
 
@@ -76,7 +80,8 @@ defmodule Oktavarium.Envelope do
   def verify(%__MODULE__{} = envelope) do
     if Crypto.verify(:event, envelope.payload, envelope.signature, envelope.signer) do
       with {:ok, fields} <- decode_payload(envelope.payload),
-           :ok <- check_signer(fields, envelope) do
+           :ok <- check_signer(fields, envelope),
+           :ok <- Content.validate_attachments(envelope.attachments, fields["body"]) do
         {:ok, build_event(fields, envelope)}
       end
     else
@@ -91,21 +96,36 @@ defmodule Oktavarium.Envelope do
   @doc "Postać przesyłana po sieci (mapa gotowa do zakodowania w JSON)."
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = envelope) do
-    %{
+    data = %{
       "payload" => Crypto.encode(envelope.payload),
       "signer" => Crypto.key_id(envelope.signer),
       "signature" => Crypto.encode(envelope.signature)
     }
+
+    if map_size(envelope.attachments) == 0,
+      do: data,
+      else: Map.put(data, "attachments", envelope.attachments)
   end
 
   @doc "Odwrotność `to_map/1`. Nie weryfikuje podpisu — użyj `verify/1`."
   @spec from_map(term()) :: {:ok, t()} | {:error, :malformed}
-  def from_map(%{"payload" => payload, "signer" => signer, "signature" => signature})
+  def from_map(%{"payload" => payload, "signer" => signer, "signature" => signature} = data)
       when is_binary(payload) and is_binary(signer) and is_binary(signature) do
     with {:ok, payload} <- Crypto.decode(payload),
          {:ok, signer} <- Crypto.decode_key_id(signer),
          {:ok, signature} <- Crypto.decode(signature) do
-      {:ok, %__MODULE__{payload: payload, signer: signer, signature: signature}}
+      attachments = Map.get(data, "attachments", %{})
+
+      if is_map(attachments) and not is_struct(attachments),
+        do:
+          {:ok,
+           %__MODULE__{
+             payload: payload,
+             signer: signer,
+             signature: signature,
+             attachments: attachments
+           }},
+        else: {:error, :malformed}
     else
       _ -> {:error, :malformed}
     end

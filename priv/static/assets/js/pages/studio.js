@@ -332,7 +332,7 @@ function resourcesSection(d) {
         h("li", {},
           r.kind === "image" && h("img", { src: "/blobs/" + r.hash, alt: r.meta.alt || "", width: 56, height: 56, loading: "lazy" }),
           h("span", { class: "res-main" }, h("code", {}, r.path), " ", h("span", { class: "muted" }, `${r.media_type} · ${fmtSize(r.size)}`), r.meta.title && h("span", {}, " · " + r.meta.title)),
-          h("button", { class: "btn small", type: "button", onclick: () => act("resource.delete", { path: r.path }) }, "Usuń"))));
+          h("button", { class: "btn small", type: "button", onclick: () => act("resource.delete", { id: r.id }) }, "Usuń"))));
 
   return h("section", { class: "panel", "aria-labelledby": "res-h" },
     h("h2", { id: "res-h" }, "Zasoby"),

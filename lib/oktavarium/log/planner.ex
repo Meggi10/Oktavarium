@@ -1,12 +1,12 @@
 defmodule Oktavarium.Log.Planner do
   @moduledoc false
-  alias Oktavarium.{Authz, Capability, Crypto, Envelope}
+  alias Oktavarium.{Authz, Capability, Content, Crypto, Envelope}
   alias Oktavarium.Identities.{Profile, Rules}
-  alias Oktavarium.Resources
+  alias Oktavarium.{Projects, Resources}
   alias Oktavarium.Log.Facts
 
   @supported_types ~w(grant.create grant.revoke profile.update identity.visibility.set key.add key.revoke auth_key.add auth_key.revoke
-                      resource.put resource.delete)
+                      resource.put resource.delete project.create project.update project.delete)
 
   @type op ::
           {:identity
@@ -79,6 +79,7 @@ defmodule Oktavarium.Log.Planner do
             kind: kind,
             handle: handle,
             profile: %{},
+            profile_refs: %{},
             visibility: visibility
           }},
          {:key,
@@ -264,14 +265,22 @@ defmodule Oktavarium.Log.Planner do
   end
 
   defp plan_type("profile.update", envelope, event, facts) do
-    with {:ok, changes} <- Profile.parse_changes(Map.get(event.body, "fields")),
+    with {:ok, {values, hashes}} <-
+           Content.materialize(
+             Map.get(event.body, "fields"),
+             envelope.attachments,
+             :profile,
+             facts.replaying?
+           ),
+         {:ok, changes} <- Profile.parse_changes_for_replay(values, facts.replaying?),
          :ok <- authorize_profile(changes, event, facts) do
       profile = Profile.apply_changes(Map.get(facts.identity, :profile), changes)
+      refs = Profile.apply_changes(Map.get(facts.identity, :profile_refs), hashes)
 
       {:ok,
        [
          event_op(envelope, event),
-         {:profile, %{identity_id: event.identity, profile: profile}}
+         {:profile, %{identity_id: event.identity, profile: profile, profile_refs: refs}}
        ]}
     end
   end
@@ -387,36 +396,216 @@ defmodule Oktavarium.Log.Planner do
   end
 
   defp plan_type("resource.put", envelope, event, facts) do
-    with {:ok, put} <- Resources.parse_put(event.body),
+    with {:ok, {meta, hashes}} <-
+           Content.materialize(
+             Map.get(event.body, "meta", %{}),
+             envelope.attachments,
+             :meta,
+             facts.replaying?
+           ),
+         {:ok, put} <- Resources.parse_put(Map.put(event.body, "meta", meta)),
+         {:ok, attrs} <- resource_put_attrs(Map.put(put, :meta_refs, hashes), event, facts),
          :ok <-
            authorize(
              event,
              facts,
              Resources.put_action(),
-             Resources.resource(event.identity, put.path)
+             Resources.resource(event.identity, put.path, attrs.project_id)
+           ),
+         :ok <-
+           authorize_old_path(
+             event,
+             facts,
+             Resources.put_action(),
+             facts.resource,
+             put.path,
+             attrs.project_id
            ) do
-      {:ok,
-       [
-         event_op(envelope, event),
-         {:resource, Map.merge(put, %{identity_id: event.identity, event_id: event.id})}
-       ]}
+      {:ok, [event_op(envelope, event), {:resource, attrs}]}
     end
   end
 
   defp plan_type("resource.delete", envelope, event, facts) do
-    with {:ok, path} <- Resources.parse_delete(event.body),
+    with {:ok, selector} <- Resources.parse_delete(event.body),
+         :ok <- check(not is_nil(facts.resource), :unknown_resource),
+         :ok <- check(facts.resource.kind != :project, :not_a_file),
+         :ok <-
+           check(is_nil(selector.path) or selector.path == facts.resource.path, :unknown_resource),
+         :ok <-
+           check(
+             not Map.has_key?(event.body, "project_id") or
+               selector.project_id == facts.resource.project_id,
+             :unknown_resource
+           ),
          :ok <-
            authorize(
              event,
              facts,
              Resources.delete_action(),
-             Resources.resource(event.identity, path)
-           ),
-         :ok <- check(not is_nil(facts.resource), :unknown_resource) do
-      {:ok,
-       [event_op(envelope, event), {:resource_delete, %{identity_id: event.identity, path: path}}]}
+             Resources.resource(event.identity, facts.resource.path, facts.resource.project_id)
+           ) do
+      {:ok, [event_op(envelope, event), {:resource_delete, %{id: facts.resource.id}}]}
     end
   end
+
+  # Projekt nie ma własnego bloba: metadane i przypisane pliki są projekcją
+  # podpisanych zdarzeń w dzienniku właściciela (osoby lub kolektywu).
+  defp plan_type("project.create", envelope, event, facts) do
+    with {:ok, {meta, hashes}} <-
+           Content.materialize(
+             Map.get(event.body, "meta"),
+             envelope.attachments,
+             :meta,
+             facts.replaying?
+           ),
+         {:ok, project} <- Projects.parse_create(Map.put(event.body, "meta", meta)),
+         :ok <- check(is_nil(facts.path_resource), :project_slug_taken),
+         :ok <-
+           authorize(
+             event,
+             facts,
+             "project.create",
+             Resources.resource(event.identity, project.path)
+           ) do
+      attrs = %{
+        id: event.id,
+        identity_id: event.identity,
+        project_id: nil,
+        path: project.path,
+        kind: :project,
+        hash: nil,
+        size: nil,
+        media_type: nil,
+        meta: project.meta,
+        meta_refs: hashes,
+        event_id: event.id
+      }
+
+      {:ok, [event_op(envelope, event), {:resource, attrs}]}
+    end
+  end
+
+  defp plan_type("project.update", envelope, event, facts) do
+    with {:ok, {meta, hashes}} <-
+           project_update_content(event.body, envelope.attachments, facts.replaying?),
+         {:ok, update} <-
+           Projects.parse_update(
+             if(meta == :unchanged, do: event.body, else: Map.put(event.body, "meta", meta))
+           ),
+         :ok <- check(match?(%{kind: :project}, facts.project), :unknown_project),
+         path = if(update.path == :unchanged, do: facts.project.path, else: update.path),
+         meta = if(update.meta == :unchanged, do: facts.project.meta, else: update.meta),
+         meta_refs = if(update.meta == :unchanged, do: facts.project.meta_refs, else: hashes),
+         :ok <-
+           check(
+             is_nil(facts.path_resource) or facts.path_resource.id == facts.project.id,
+             :project_slug_taken
+           ),
+         :ok <-
+           authorize(
+             event,
+             facts,
+             "project.update",
+             Resources.resource(event.identity, facts.project.path)
+           ),
+         :ok <-
+           authorize(event, facts, "project.update", Resources.resource(event.identity, path)) do
+      attrs = %{
+        id: facts.project.id,
+        identity_id: event.identity,
+        path: path,
+        kind: :project,
+        meta: meta,
+        meta_refs: meta_refs,
+        event_id: event.id
+      }
+
+      {:ok, [event_op(envelope, event), {:resource, attrs}]}
+    end
+  end
+
+  defp plan_type("project.delete", envelope, event, facts) do
+    with {:ok, _project_id} <- Projects.parse_delete(event.body),
+         :ok <- check(match?(%{kind: :project}, facts.project), :unknown_project),
+         :ok <- check(not facts.project_children?, :project_not_empty),
+         :ok <-
+           authorize(
+             event,
+             facts,
+             "project.delete",
+             Resources.resource(event.identity, facts.project.path)
+           ) do
+      {:ok, [event_op(envelope, event), {:resource_delete, %{id: facts.project.id}}]}
+    end
+  end
+
+  defp project_update_content(body, attachments, replay?) do
+    if Map.has_key?(body, "meta"),
+      do: Content.materialize(body["meta"], attachments, :meta, replay?) |> wrap_meta(),
+      else: {:ok, {:unchanged, %{}}}
+  end
+
+  defp wrap_meta({:ok, {meta, refs}}), do: {:ok, {meta, refs}}
+  defp wrap_meta(error), do: error
+
+  # ID tworzy pierwsze zdarzenie. Nowsze zdarzenia mogą używać id zamiast
+  # ścieżki jako selektora, a nawet zmienić path bez utraty tożsamości zasobu.
+  # Brak id zachowuje dotychczasowe resource.put (nadpisanie po path).
+  defp resource_put_attrs(put, event, facts) do
+    old = facts.resource
+
+    cond do
+      not is_nil(put.id) and is_nil(old) ->
+        {:error, :unknown_resource}
+
+      not is_nil(old) and old.kind != put.kind ->
+        {:error, :resource_kind_mismatch}
+
+      not is_nil(facts.path_resource) and (is_nil(old) or facts.path_resource.id != old.id) ->
+        {:error, :resource_path_taken}
+
+      put.project_id != :unchanged and not is_nil(put.project_id) and
+          not match?(%{kind: :project}, facts.project) ->
+        {:error, :unknown_project}
+
+      true ->
+        project_id =
+          if put.project_id == :unchanged,
+            do: if(old, do: old.project_id, else: nil),
+            else: put.project_id
+
+        attrs =
+          put
+          |> Map.put(:id, if(old, do: old.id, else: event.id))
+          |> Map.put(:identity_id, event.identity)
+          |> Map.put(:project_id, project_id)
+          |> Map.put(:event_id, event.id)
+
+        {:ok, attrs}
+    end
+  end
+
+  defp authorize_old_path(_event, _facts, _action, nil, _path, _project_id), do: :ok
+
+  defp authorize_old_path(
+         _event,
+         _facts,
+         _action,
+         %{path: path, project_id: project_id},
+         path,
+         project_id
+       ),
+       do: :ok
+
+  defp authorize_old_path(
+         event,
+         facts,
+         action,
+         %{path: path, project_id: project_id},
+         _new_path,
+         _new_project_id
+       ),
+       do: authorize(event, facts, action, Resources.resource(event.identity, path, project_id))
 
   # Każde zmieniane pole to osobny zasób, więc delegat z grantem na `<id>/profile/bio`
   # nie zmieni `display_name`. Błąd wskazuje pierwsze (alfabetycznie) niedozwolone pole.

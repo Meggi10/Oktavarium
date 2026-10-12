@@ -317,6 +317,9 @@ defmodule OktavariumWeb.IdentityHTML do
       <div :for={{field, value} <- @fields}>
         <dt>{Map.get(field_labels(), field, field)}</dt>
         <dd :if={is_binary(value)} class="set">{clip(value)}</dd>
+        <dd :if={is_map(value) and is_binary(value["sha256"])} class="set">
+          wersja SHA-256: <code class="hash">{short(value["sha256"])}</code>
+        </dd>
         <dd :if={is_nil(value)} class="unset">usunięto</dd>
       </div>
     </dl>

@@ -382,7 +382,11 @@ defmodule Oktavarium.CliTest do
       assert event.prev == ctx.genesis.id
 
       assert event.body == %{
-               "fields" => %{"display_name" => "Pelagia", "bio" => "a=b, c", "location" => nil}
+               "fields" => %{
+                 "display_name" => %{"sha256" => Oktavarium.Content.hash("Pelagia")},
+                 "bio" => %{"sha256" => Oktavarium.Content.hash("a=b, c")},
+                 "location" => nil
+               }
              }
     end
 
@@ -393,7 +397,9 @@ defmodule Oktavarium.CliTest do
                  set: ["website=https://a.pl/?x=1"]
                )
 
-      assert event.body["fields"] == %{"website" => "https://a.pl/?x=1"}
+      assert event.body["fields"] == %{
+               "website" => %{"sha256" => Oktavarium.Content.hash("https://a.pl/?x=1")}
+             }
 
       assert {:error, {:invalid_profile_field, "fields.bio"}} =
                Cli.update_profile(ctx.key_path, after: ctx.genesis_path, set: ["bio="])

@@ -67,19 +67,65 @@ defmodule Oktavarium.Directory do
   # zasoby
 
   @doc """
-  Zasoby tożsamości (`:image`, `:audio`, `:site` albo wszystkie), posortowane po
-  rodzaju i ścieżce. Każdy jako mapa z polami wpisu.
+  Pliki tożsamości (`:image`, `:audio`, `:site` albo wszystkie), z trwałymi
+  identyfikatorami i opcjonalnym `project_id`. Projekty są udostępniane osobno.
   """
   @spec resources(%Identity{}, atom() | nil) :: [map()]
   def resources(%Identity{id: id}, kind \\ nil) do
     query =
       from r in Resource,
-        where: r.identity_id == ^id,
+        where: r.identity_id == ^id and r.kind != ^:project,
         order_by: [asc: r.kind, asc: r.path],
-        select: map(r, [:path, :kind, :hash, :size, :media_type, :meta, :updated_at])
+        select:
+          map(r, [
+            :id,
+            :project_id,
+            :path,
+            :kind,
+            :hash,
+            :size,
+            :media_type,
+            :meta,
+            :meta_refs,
+            :updated_at
+          ])
 
     query = if kind, do: where(query, [r], r.kind == ^kind), else: query
     Repo.all(query)
+  end
+
+  @doc "Projekty tożsamości. Sam projekt nie ma bloba; jest kontenerem zasobów."
+  @spec projects(%Identity{}) :: [map()]
+  def projects(%Identity{id: id}) do
+    Repo.all(
+      from r in Resource,
+        where: r.identity_id == ^id and r.kind == ^:project,
+        order_by: [asc: r.path],
+        select: map(r, [:id, :path, :meta, :meta_refs, :updated_at])
+    )
+  end
+
+  @doc "Pliki z danego projektu tej samej tożsamości."
+  @spec project_resources(%Identity{}, String.t()) :: [map()]
+  def project_resources(%Identity{id: id}, project_id) do
+    Repo.all(
+      from r in Resource,
+        where: r.identity_id == ^id and r.project_id == ^project_id and r.kind != ^:project,
+        order_by: [asc: r.kind, asc: r.path],
+        select:
+          map(r, [
+            :id,
+            :project_id,
+            :path,
+            :kind,
+            :hash,
+            :size,
+            :media_type,
+            :meta,
+            :meta_refs,
+            :updated_at
+          ])
+    )
   end
 
   @doc """
@@ -97,10 +143,13 @@ defmodule Oktavarium.Directory do
         order_by: [desc: r.updated_at, desc: r.inserted_at, asc: r.path],
         limit: ^Keyword.get(opts, :limit, 48),
         select: %{
+          id: r.id,
+          project_id: r.project_id,
           path: r.path,
           hash: r.hash,
           media_type: r.media_type,
           meta: r.meta,
+          meta_refs: r.meta_refs,
           at: r.updated_at,
           identity_id: i.id,
           handle: i.handle,
@@ -133,7 +182,7 @@ defmodule Oktavarium.Directory do
           join: i in Identity,
           on: i.id == r.identity_id,
           where:
-            i.handle == ^handle and r.kind == ^:site and
+            i.handle == ^handle and r.kind == ^:site and is_nil(r.project_id) and
               r.path == ^("site/" <> relative),
           select: %{hash: r.hash, media_type: r.media_type, size: r.size}
       )
@@ -145,7 +194,8 @@ defmodule Oktavarium.Directory do
   def has_site?(%Identity{id: id}),
     do:
       Repo.exists?(
-        from r in Resource, where: r.identity_id == ^id and r.path == "site/index.html"
+        from r in Resource,
+          where: r.identity_id == ^id and r.path == "site/index.html" and is_nil(r.project_id)
       )
 
   @doc "Blob obrazu/nagrania dostępny pod bezpośrednim adresem, także z tożsamości `unlisted`."

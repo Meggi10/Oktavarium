@@ -248,7 +248,12 @@ defmodule Mix.Tasks.OktavariumTasksTest do
     _ = infos()
 
     assert {:ok, [_, %{body: %{"fields" => fields}}, _]} = Cli.verify_files([g, p1, p2])
-    assert fields == %{"display_name" => "Pelagia", "bio" => "a=b", "location" => nil}
+
+    assert fields == %{
+             "display_name" => %{"sha256" => Oktavarium.Content.hash("Pelagia")},
+             "bio" => %{"sha256" => Oktavarium.Content.hash("a=b")},
+             "location" => nil
+           }
   end
 
   test "oktavarium.profile: błędy kończą się Mix.Error", %{tmp_dir: dir} do
