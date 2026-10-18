@@ -22,6 +22,8 @@ defmodule OktavariumWeb.IdentityController do
     {entries, next_before} = Directory.timeline(identity, before: before)
     grants = Directory.grants(identity)
     auth_keys = Directory.auth_keys(identity)
+    resources = Directory.resources(identity)
+    avatar = Directory.avatar(resources)
 
     key_ids =
       Enum.flat_map(grants, &[&1.subject_key_id, &1.issuer_key_id]) ++
@@ -33,7 +35,9 @@ defmodule OktavariumWeb.IdentityController do
       identity: identity,
       founding_key: Directory.founding_key_id(identity),
       auth_keys: auth_keys,
-      resources: Directory.resources(identity),
+      resources: resources,
+      avatar_hash: if(avatar && Oktavarium.Blobs.exists?(avatar.hash), do: avatar.hash),
+      projects: Directory.projects(identity),
       members: Directory.members(identity),
       site_url:
         if(Directory.has_site?(identity), do: OktavariumWeb.SitePlug.site_url(identity.handle)),

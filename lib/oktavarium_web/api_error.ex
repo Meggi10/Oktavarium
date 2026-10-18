@@ -4,7 +4,7 @@ defmodule OktavariumWeb.ApiError do
   import Phoenix.Controller, only: [json: 2]
 
   @forbidden ~w(not_authorized unknown_signer not_signing_key key_revoked parent_not_delegable
-                grant_inactive broken_chain registration_closed invalid_csrf invalid_invite)a
+                grant_inactive broken_chain not_covered window_exceeds_parent registration_closed invalid_csrf invalid_invite)a
   @conflict ~w(duplicate_event bad_seq bad_prev handle_taken signing_key_already_registered conflict
                already_revoked already_member project_slug_taken resource_path_taken
                resource_kind_mismatch project_not_empty)a

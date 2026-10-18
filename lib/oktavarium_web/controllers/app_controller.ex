@@ -10,8 +10,8 @@ defmodule OktavariumWeb.AppController do
 
   def login(conn, _params) do
     conn
-    |> assign(:page_title, "Zaloguj")
-    |> render(:app, page: "login", heading: "Zaloguj się kluczem", registration: registration())
+    |> assign(:page_title, "Odblokuj klucze")
+    |> render(:app, page: "login", heading: "Odblokuj klucze", registration: registration())
   end
 
   def studio(conn, _params) do

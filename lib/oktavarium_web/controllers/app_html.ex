@@ -15,8 +15,12 @@ defmodule OktavariumWeb.AppHTML do
           Ta strona wymaga JavaScriptu: podpisywanie zdarzeń odbywa się w przeglądarce.
         </p>
       </noscript>
-      <p class="muted" id="app-loading">Ładowanie…</p>
+      <p class="muted" id="app-loading" role="status">
+        Przygotowanie interfejsu... Jeśli nie otworzy się poprawnie, możesz odświeżyć stronę.
+      </p>
     </section>
+    <script defer src={~p"/assets/js/app-boot-guard.js"}>
+    </script>
     <script type="module" src={"/assets/js/pages/" <> @page <> ".js"}>
     </script>
     """

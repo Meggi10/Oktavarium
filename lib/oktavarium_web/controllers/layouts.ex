@@ -17,6 +17,8 @@ defmodule OktavariumWeb.Layouts do
         <title>{if @page_title, do: @page_title <> " | Oktavarium", else: "Oktavarium"}</title>
         <link rel="icon" href={~p"/favicon.svg"} type="image/svg+xml" />
         <link rel="stylesheet" href={~p"/assets/app.css"} />
+        <script type="module" src={~p"/assets/js/lib/copy-id.js"}>
+        </script>
       </head>
       <body>
         <a class="skip" href="#main">Przejdź do treści</a>
@@ -36,15 +38,24 @@ defmodule OktavariumWeb.Layouts do
       <a class="wordmark" href={~p"/"} aria-label="Oktavarium — strona główna">
         <svg
           class="mark"
-          viewBox="0 0 24 24"
-          width="24"
-          height="24"
+          viewBox="0 0 32 32"
+          width="30"
+          height="30"
           aria-hidden="true"
           focusable="false"
         >
-          <line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" stroke-width="2.5" />
-          <circle cx="12" cy="9" r="4.5" fill="currentColor" />
-          <circle cx="12" cy="9" r="1.6" fill="var(--paper)" />
+          <circle cx="16" cy="16" r="12.5" fill="none" stroke="currentColor" stroke-width="2.5" />
+          <text
+            x="16"
+            y="21"
+            text-anchor="middle"
+            fill="currentColor"
+            font-family="system-ui, sans-serif"
+            font-size="17"
+            font-weight="650"
+          >
+            o
+          </text>
         </svg>
         Oktavarium
       </a>
@@ -54,7 +65,7 @@ defmodule OktavariumWeb.Layouts do
       </nav>
       <div class="nav-actions">
         <a class="nav-login" href={~p"/login"} aria-current={if @active == "/login", do: "page"}>
-          Zaloguj się
+          Odblokuj klucze
         </a>
         <a class="btn primary" href={~p"/join"} aria-current={if @active == "/join", do: "page"}>
           Dołącz
@@ -62,10 +73,6 @@ defmodule OktavariumWeb.Layouts do
       </div>
     </header>
     <main id="main" tabindex="-1">{render_slot(@inner_block)}</main>
-    <footer class="foot">
-      <p><strong>Oktavarium</strong> · Małe społeczności, wspólne rzeczy.</p>
-      <span>Prototyp akademicki</span>
-    </footer>
     """
   end
 

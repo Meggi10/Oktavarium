@@ -70,7 +70,13 @@ defmodule OktavariumWeb.Components do
 
   def key_id(assigns) do
     ~H"""
-    <code class="hash" title={@id}>{short(@id)}</code>
+    <button
+      type="button"
+      class="hash copy-id"
+      data-copy-value={@id}
+      title={@id}
+      aria-label={"Skopiuj pełny identyfikator: " <> @id}
+    >{short(@id)}</button>
     """
   end
 
@@ -87,6 +93,14 @@ defmodule OktavariumWeb.Components do
       @home.identity_id
     )}</a>
     <.key_id :if={!@home} id={@key_id} />
+    <button
+      :if={@home}
+      type="button"
+      class="copy-id copy-id-icon"
+      data-copy-value={@key_id}
+      title={@key_id}
+      aria-label={"Skopiuj pełny identyfikator klucza: " <> @key_id}
+    >⧉</button>
     """
   end
 end

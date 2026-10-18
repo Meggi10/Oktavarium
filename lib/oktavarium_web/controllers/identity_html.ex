@@ -2,6 +2,8 @@ defmodule OktavariumWeb.IdentityHTML do
   @moduledoc false
   use OktavariumWeb, :html
 
+  import OktavariumWeb.PublicComponents
+
   @field_labels %{
     "display_name" => "Nazwa",
     "bio" => "Opis",
@@ -12,6 +14,7 @@ defmodule OktavariumWeb.IdentityHTML do
   def show(assigns) do
     assigns =
       assigns
+      |> Map.put_new(:projects, [])
       |> Map.put(:profile, assigns.identity.profile || %{})
       |> Map.put(:ref, assigns.identity.handle || assigns.identity.id)
       |> Map.put(:images, images(assigns.resources))
@@ -22,9 +25,19 @@ defmodule OktavariumWeb.IdentityHTML do
     <article class="profile-page">
       <a class="back-link" href={~p"/"}><span aria-hidden="true">←</span> Odkrywaj</a>
       <header class="profile-header">
-        <span class="avatar avatar-large" data-kind={@identity.kind} aria-hidden="true">{initial(
-          @identity
-        )}</span>
+        <img
+          :if={@avatar_hash}
+          class="avatar avatar-large avatar-photo"
+          src={~p"/blobs/#{@avatar_hash}"}
+          alt={"Zdjęcie profilowe: " <> name(@identity)}
+          decoding="async"
+        />
+        <span
+          :if={!@avatar_hash}
+          class="avatar avatar-large"
+          data-kind={@identity.kind}
+          aria-hidden="true"
+        >{initial(@identity)}</span>
         <div class="profile-copy">
           <p class="eyebrow">{public_kind(@identity.kind)}</p>
           <h1>{name(@identity)}</h1>
@@ -49,8 +62,10 @@ defmodule OktavariumWeb.IdentityHTML do
             </div>
           </dl>
         </div>
-        <div :if={@site_url} class="profile-actions">
-          <a class="btn" href={@site_url} target="_blank" rel="noopener noreferrer">
+        <div class="profile-actions">
+          <a class="btn" href={~p"/studio?#{[ref: @ref]}"}>Otwórz w Pracowni</a>
+          <span :if={@identity.visibility == :unlisted} class="tag">Nieindeksowana · dostępna przez adres</span>
+          <a :if={@site_url} class="btn" href={@site_url} target="_blank" rel="noopener noreferrer">
             Własna strona <span aria-hidden="true">↗</span>
             <span class="sr">(otwiera się w nowej karcie)</span>
           </a>
@@ -58,6 +73,20 @@ defmodule OktavariumWeb.IdentityHTML do
       </header>
 
       <p :if={@integrity != :ok} class="notice bad" role="alert">{integrity_text(@integrity)}</p>
+
+      <section
+        :if={@projects != []}
+        id="profile-projects"
+        class="gallery-section"
+        aria-labelledby="profile-projects-h"
+      >
+        <div class="section-heading">
+          <h2 id="profile-projects-h">Projekty</h2>
+        </div>
+        <div class="project-grid">
+          <.project_card :for={p <- @projects} project={p} identity={@identity} />
+        </div>
+      </section>
 
       <section id="resources" aria-labelledby="res-h" class="resources-section profile-resources">
         <div class="section-heading">
@@ -72,6 +101,7 @@ defmodule OktavariumWeb.IdentityHTML do
           <li :for={r <- @images}>
             <figure>
               <a
+                :if={Oktavarium.Blobs.exists?(r.hash)}
                 class="media-link"
                 href={~p"/blobs/#{r.hash}"}
                 target="_blank"
@@ -85,6 +115,9 @@ defmodule OktavariumWeb.IdentityHTML do
                   decoding="async"
                 />
               </a>
+              <p :if={!Oktavarium.Blobs.exists?(r.hash)} class="notice warn">
+                Treść niedostępna. Historia i referencja pozostają.
+              </p>
               <figcaption>
                 <span class="cap-title">{r.meta["title"] || r.path}</span>
                 <p :if={r.meta["description"]} class="media-description">{r.meta["description"]}</p>
@@ -95,7 +128,11 @@ defmodule OktavariumWeb.IdentityHTML do
         <ul :if={@tracks != []} class="tracks" aria-label="Nagrania">
           <li :for={r <- @tracks}>
             <div class="track-head"><span class="cap-title">{r.meta["title"] || r.path}</span></div>
+            <p :if={!Oktavarium.Blobs.exists?(r.hash)} class="notice warn">
+              Treść niedostępna. Historia i referencja pozostają.
+            </p>
             <audio
+              :if={Oktavarium.Blobs.exists?(r.hash)}
               controls
               preload="none"
               src={~p"/blobs/#{r.hash}"}
@@ -137,7 +174,7 @@ defmodule OktavariumWeb.IdentityHTML do
               </div>
               <div>
                 <dt>Identyfikator</dt>
-                <dd class="full-id">{@identity.id}</dd>
+                <dd class="full-id"><.key_id id={@identity.id} /></dd>
               </div>
               <div :if={@founding_key}>
                 <dt>Klucz założycielski</dt>
@@ -242,7 +279,7 @@ defmodule OktavariumWeb.IdentityHTML do
                   <.event_body e={e} identity_id={@identity.id} homes={@homes} />
                   <p class="ev-meta">
                     Podpisał <.holder key_id={e.signer} homes={@homes} />
-                    <code class="hash" title={e.id}>{short(e.id)}</code>
+                    <.key_id id={e.id} />
                   </p>
                 </li>
               </ol>
@@ -318,7 +355,7 @@ defmodule OktavariumWeb.IdentityHTML do
         <dt>{Map.get(field_labels(), field, field)}</dt>
         <dd :if={is_binary(value)} class="set">{clip(value)}</dd>
         <dd :if={is_map(value) and is_binary(value["sha256"])} class="set">
-          wersja SHA-256: <code class="hash">{short(value["sha256"])}</code>
+          wersja SHA-256: <.key_id id={value["sha256"]} />
         </dd>
         <dd :if={is_nil(value)} class="unset">usunięto</dd>
       </div>
@@ -331,8 +368,7 @@ defmodule OktavariumWeb.IdentityHTML do
 
     ~H"""
     <p class="ev-line">
-      Cofnięto uprawnienie
-      <code class="hash" title={@body["grant"]}>{short(@body["grant"] || "")}</code>
+      Cofnięto uprawnienie <.key_id id={@body["grant"] || ""} />
     </p>
     """
   end
@@ -405,9 +441,18 @@ defmodule OktavariumWeb.IdentityHTML do
     end
   end
 
-  defp images(resources), do: Enum.filter(resources, &(&1.kind == :image))
+  defp images(resources),
+    do:
+      Enum.filter(
+        resources,
+        &(&1.kind == :image and
+            not (is_nil(&1.project_id) and &1.path == Oktavarium.Directory.avatar_path()))
+      )
+
   defp tracks(resources), do: Enum.filter(resources, &(&1.kind == :audio))
-  defp site_files(resources), do: Enum.filter(resources, &(&1.kind == :site))
+
+  defp site_files(resources),
+    do: Enum.filter(resources, &(&1.kind == :site and is_nil(&1.project_id)))
 
   defp format_size(n) when is_integer(n) and n >= 1_048_576,
     do: "#{Float.round(n / 1_048_576, 1)} MiB"

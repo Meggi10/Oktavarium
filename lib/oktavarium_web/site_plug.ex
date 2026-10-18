@@ -12,11 +12,59 @@ defmodule OktavariumWeb.SitePlug do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    with domain when is_binary(domain) <- Application.get_env(:oktavarium, :sites_domain),
-         {:ok, handle} <- handle(conn.host, domain) do
-      serve(conn, handle)
+    domain = Application.get_env(:oktavarium, :sites_domain)
+
+    if is_binary(domain) and String.ends_with?(conn.host, "." <> domain) do
+      case site_target(conn.host, domain) do
+        {:ok, target} -> serve(conn, target)
+        :error -> conn |> send_resp(404, "Nie ma takiej strony.") |> halt()
+      end
     else
-      _ -> conn
+      conn
+    end
+  end
+
+  defp site_target(host, domain) do
+    case project_id(host, domain) do
+      {:ok, id} ->
+        {:ok, {:project, id}}
+
+      :error ->
+        case handle(host, domain) do
+          {:ok, label} -> {:ok, {:identity, label}}
+          :error -> :error
+        end
+    end
+  end
+
+  @doc "Round-trippable project host: p-<lowercase base32 digest>, below 63 characters."
+  def project_id(host, domain) do
+    suffix = "." <> domain
+
+    with true <- String.ends_with?(host, suffix),
+         label = String.replace_suffix(host, suffix, ""),
+         "p-" <> encoded <- label,
+         true <- Regex.match?(~r/\A[a-z2-7]{52}\z/, encoded),
+         {:ok, <<_::binary-size(32)>> = bytes} <-
+           Base.decode32(String.upcase(encoded), padding: false),
+         true <- String.downcase(Base.encode32(bytes, padding: false)) == encoded do
+      {:ok, Oktavarium.Crypto.encode(bytes)}
+    else
+      _ -> :error
+    end
+  end
+
+  def project_url(id) do
+    domain = Application.get_env(:oktavarium, :sites_domain)
+
+    with true <- is_binary(domain),
+         {:ok, <<_::binary-size(32)>> = bytes} <- Oktavarium.Crypto.decode(id) do
+      main = URI.parse(OktavariumWeb.Endpoint.url())
+      port = if main.port in [nil, 80, 443], do: "", else: ":#{main.port}"
+      label = "p-" <> String.downcase(Base.encode32(bytes, padding: false))
+      "#{main.scheme}://#{label}.#{domain}#{port}/"
+    else
+      _ -> nil
     end
   end
 
@@ -69,7 +117,14 @@ defmodule OktavariumWeb.SitePlug do
       if etag in get_req_header(conn, "if-none-match") do
         conn |> send_resp(304, "") |> halt()
       else
-        conn |> send_file(200, path) |> halt()
+        if conn.method == "HEAD" do
+          conn
+          |> put_resp_header("content-length", Integer.to_string(file.size))
+          |> send_resp(200, "")
+          |> halt()
+        else
+          conn |> send_file(200, path) |> halt()
+        end
       end
     else
       _ -> conn |> send_resp(404, "Nie ma takiej strony.") |> halt()
@@ -81,11 +136,14 @@ defmodule OktavariumWeb.SitePlug do
 
   # `/blog` może być plikiem albo katalogiem z `index.html`
   defp find_file(handle, relative) do
-    case Directory.site_file(handle, relative) do
+    case site_file(handle, relative) do
       {:ok, file} -> {:ok, file}
-      :error -> Directory.site_file(handle, relative <> "/index.html")
+      :error -> site_file(handle, relative <> "/index.html")
     end
   end
+
+  defp site_file({:identity, handle}, relative), do: Directory.site_file(handle, relative)
+  defp site_file({:project, id}, relative), do: Directory.project_site_file(id, relative)
 
   @doc false
   def relative_path(segments) do

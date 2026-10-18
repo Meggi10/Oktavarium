@@ -39,6 +39,28 @@ defmodule OktavariumWeb.BlobController do
     end
   end
 
+  # A source download is not an executable website. In particular, HTML/SVG/JS
+  # must never run with access to the application's origin or local key vault.
+  def download(conn, %{"ref" => ref, "resource_id" => id}) do
+    with %{} = identity <- Directory.get_identity(ref),
+         %{} = resource <- Directory.file(identity, id),
+         {:ok, path} <- Blobs.path(resource.hash),
+         true <- File.regular?(path) do
+      filename = Path.basename(resource.path)
+
+      conn
+      |> put_resp_header("content-type", "application/octet-stream")
+      |> put_resp_header("content-disposition", ~s(attachment; filename="#{filename}"))
+      |> put_resp_header("content-security-policy", "sandbox; default-src 'none'")
+      |> put_resp_header("x-content-type-options", "nosniff")
+      |> put_resp_header("cross-origin-resource-policy", "same-origin")
+      |> put_resp_header("cache-control", "no-store")
+      |> send_file(200, path)
+    else
+      _ -> ApiError.send(conn, :unknown_resource)
+    end
+  end
+
   defp send_blob(conn, file, size) do
     case get_req_header(conn, "range") do
       ["bytes=" <> spec] ->

@@ -2,6 +2,9 @@ defmodule OktavariumWeb.PageHTML do
   @moduledoc false
   use OktavariumWeb, :html
 
+  import OktavariumWeb.PublicComponents
+
+  attr :projects, :list, default: []
   attr :entries, :list, required: true
   attr :images, :list, default: []
   attr :tracks, :list, default: []
@@ -22,6 +25,7 @@ defmodule OktavariumWeb.PageHTML do
       <a href={~p"/"} aria-current={if @view == "all", do: "page"}>Wszystko</a>
       <a href={~p"/?view=images"} aria-current={if @view == "images", do: "page"}>Obrazy</a>
       <a href={~p"/?view=audio"} aria-current={if @view == "audio", do: "page"}>Nagrania</a>
+      <a href={~p"/?view=projects"} aria-current={if @view == "projects", do: "page"}>Projekty</a>
       <a href={~p"/?view=people"} aria-current={if @view == "people", do: "page"}>Osoby i kolektywy</a>
     </nav>
 
@@ -39,7 +43,7 @@ defmodule OktavariumWeb.PageHTML do
         <p>Możesz też utworzyć tożsamość przez CLI. Klucze prywatne zostają u Ciebie.</p>
         <pre class="code"><code>mix oktavarium.key.gen --out keys/ja.key
     mix oktavarium.key.gen --kind auth --out keys/laptop.key
-    mix oktavarium.identity.create --key keys/ja.key --kind user --handle ja \
+    mix oktavarium.identity.create --key keys/ja.key --kind person --handle ja \
       --auth-key ID_KLUCZA_AUTH --out events/ja-0.json
     mix oktavarium.submit events/ja-0.json</code></pre>
       </details>
@@ -55,7 +59,11 @@ defmodule OktavariumWeb.PageHTML do
           <ul class="gallery">
             <li :for={img <- @images}>
               <figure>
-                <a class="media-link" href={~p"/i/#{img.handle || img.identity_id}"}>
+                <a
+                  :if={Oktavarium.Blobs.exists?(img.hash)}
+                  class="media-link"
+                  href={~p"/i/#{img.handle || img.identity_id}"}
+                >
                   <img
                     src={~p"/blobs/#{img.hash}"}
                     alt={img.meta["alt"] || img.meta["title"] || img.path}
@@ -63,6 +71,7 @@ defmodule OktavariumWeb.PageHTML do
                     decoding="async"
                   />
                 </a>
+                <p :if={!Oktavarium.Blobs.exists?(img.hash)} class="notice warn">Treść niedostępna</p>
                 <figcaption>
                   <a class="cap-title" href={~p"/i/#{img.handle || img.identity_id}"}>
                     {img.meta["title"] || img.path}
@@ -85,7 +94,9 @@ defmodule OktavariumWeb.PageHTML do
                 <span class="cap-title">{t.meta["title"] || t.path}</span>
                 <a class="cap-by" href={~p"/i/#{t.handle || t.identity_id}"}>{owner_name(t)}</a>
               </div>
+              <p :if={!Oktavarium.Blobs.exists?(t.hash)} class="notice warn">Treść niedostępna</p>
               <audio
+                :if={Oktavarium.Blobs.exists?(t.hash)}
                 controls
                 preload="none"
                 src={~p"/blobs/#{t.hash}"}
@@ -97,8 +108,20 @@ defmodule OktavariumWeb.PageHTML do
           </ul>
         </section>
 
+        <section :if={@projects != []} aria-labelledby="discover-projects-h" class="gallery-section">
+          <div class="section-heading">
+            <h2 id="discover-projects-h">Projekty</h2><a href={~p"/?view=projects"}>Wszystkie projekty</a>
+          </div>
+          <div class="project-grid">
+            <.project_card
+              :for={entry <- @projects}
+              project={entry.project}
+              identity={entry.identity}
+            />
+          </div>
+        </section>
         <section
-          :if={@images == [] && @tracks == []}
+          :if={@images == [] && @tracks == [] && @projects == []}
           class="feed-empty"
           aria-labelledby="feed-empty-h"
         >
@@ -122,9 +145,20 @@ defmodule OktavariumWeb.PageHTML do
         <ul :if={@entries != []} class="directory" aria-label="Lista tożsamości">
           <li :for={entry <- @entries}>
             <a class="identity-card" href={~p"/i/#{entry.identity.handle || entry.identity.id}"}>
-              <span class="avatar" data-kind={entry.identity.kind} aria-hidden="true">
-                {initial(entry.identity)}
-              </span>
+              <img
+                :if={entry.avatar_hash && Oktavarium.Blobs.exists?(entry.avatar_hash)}
+                class="avatar avatar-photo"
+                src={~p"/blobs/#{entry.avatar_hash}"}
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
+              <span
+                :if={!entry.avatar_hash || !Oktavarium.Blobs.exists?(entry.avatar_hash)}
+                class="avatar"
+                data-kind={entry.identity.kind}
+                aria-hidden="true"
+              >{initial(entry.identity)}</span>
               <span class="identity-card-copy">
                 <span class="row-name">{display_name(entry.identity)}</span>
                 <span :if={entry.identity.handle} class="row-handle">@{entry.identity.handle}</span>
@@ -147,6 +181,7 @@ defmodule OktavariumWeb.PageHTML do
   defp public_kind(:org), do: "kolektyw"
   defp public_kind(kind), do: kind_name(kind)
 
+  defp empty_title("projects"), do: "Nie ma jeszcze projektów"
   defp empty_title("images"), do: "Nie ma jeszcze obrazów"
   defp empty_title("audio"), do: "Nie ma jeszcze nagrań"
   defp empty_title(_view), do: "Tu pojawią się publikacje"

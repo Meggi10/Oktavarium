@@ -21,6 +21,29 @@ defmodule OktavariumWeb.EventController do
     end
   end
 
+  # Public receipt lookup. Absence means "not observed", not proof of rejection.
+  def show(conn, %{"id" => identity_id, "event_id" => event_id}) do
+    conn = put_resp_header(conn, "cache-control", "no-store")
+
+    case Repo.get_by(Oktavarium.Log.Event, id: event_id, identity_id: identity_id) do
+      nil ->
+        conn |> put_status(:not_found) |> json(%{error: %{code: "event_not_found"}})
+
+      event ->
+        json(conn, %{
+          id: event.id,
+          identity: event.identity_id,
+          seq: event.seq,
+          type: event.type,
+          envelope: %{
+            payload: Base.url_encode64(event.payload, padding: false),
+            signer: event.signer_key_id,
+            signature: Base.url_encode64(event.signature, padding: false)
+          }
+        })
+    end
+  end
+
   def head(conn, %{"id" => id}) do
     case Log.head(id) do
       {:ok, head} -> json(conn, %{identity: id, seq: head.seq, id: head.id})
