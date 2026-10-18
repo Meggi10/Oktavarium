@@ -5,11 +5,20 @@ import { b64u, enc, hex } from "./bytes.js";
 import { sign, eventId, sha256 } from "./crypto.js";
 
 async function detach(type, original) {
-  const name = type === "profile.update" ? "fields" :
-    ["resource.put", "project.create", "project.update"].includes(type) ? "meta" : null;
+  const name =
+    type === "profile.update"
+      ? "fields"
+      : ["resource.put", "project.create", "project.update"].includes(type)
+        ? "meta"
+        : null;
 
-  if (!name || !original || typeof original[name] !== "object" ||
-      original[name] === null || Array.isArray(original[name])) {
+  if (
+    !name ||
+    !original ||
+    typeof original[name] !== "object" ||
+    original[name] === null ||
+    Array.isArray(original[name])
+  ) {
     return { body: original, attachments: {} };
   }
 
@@ -28,7 +37,15 @@ async function detach(type, original) {
 }
 
 /** `{signer, identity, seq, prev, type, body, ts?}` -> `{envelope, id}`. */
-export async function buildEnvelope({ signer, identity = null, seq, prev = null, type, body, ts }) {
+export async function buildEnvelope({
+  signer,
+  identity = null,
+  seq,
+  prev = null,
+  type,
+  body,
+  ts,
+}) {
   const detached = await detach(type, body);
   const payload = enc.encode(
     JSON.stringify({
@@ -47,8 +64,12 @@ export async function buildEnvelope({ signer, identity = null, seq, prev = null,
   return {
     id: await eventId(payload),
     envelope: {
-      payload: b64u(payload), signer: signer.id, signature,
-      ...(Object.keys(detached.attachments).length ? { attachments: detached.attachments } : {}),
+      payload: b64u(payload),
+      signer: signer.id,
+      signature,
+      ...(Object.keys(detached.attachments).length
+        ? { attachments: detached.attachments }
+        : {}),
     },
   };
 }

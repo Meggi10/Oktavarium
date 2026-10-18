@@ -1,102 +1,283 @@
-// /login: odblokowanie skarbca hasłem i logowanie podpisem klucza autoryzacji.
-// Bez skarbca w tej przeglądarce można wczytać kopię zapasową.
-import { sign } from "../lib/crypto.js";
-import { enc, short } from "../lib/bytes.js";
-import { hasVault, Vault, WrongPassphrase, restoreBackup } from "../lib/keystore.js";
-import * as api from "../lib/api.js";
-import { h, mount, field, notice } from "../lib/ui.js";
-
+// /login is a local vault tool. It does not establish a server session.
+import { hasVault, Vault, restoreBackup } from "../lib/keystore.js";
+import { localVault, rememberVault, enterStudio } from "../lib/local-state.js";
+import { unlockDialog } from "../lib/vault-ui.js";
+import { h, mount, field, notice, download } from "../lib/ui.js";
+import { short } from "../lib/bytes.js";
 const root = document.getElementById("app");
-const state = { has: false, error: null, busy: false, restoring: false };
-
-async function init() {
-  state.has = await hasVault();
-  render();
-}
-
-function render() {
-  const pass = h("input", { id: "pass", type: "password", autocomplete: "current-password", required: true });
-  const file = h("input", { id: "backup", type: "file", accept: "application/json,.json" });
-
-  const unlock = h("form", { class: "stack", onsubmit: onLogin },
-    field("Hasło skarbca kluczy", pass),
-    h("div", { class: "actions" }, h("button", { class: "btn primary", type: "submit", disabled: state.busy }, state.busy ? "Logowanie..." : "Zaloguj")));
-
-  const restore = h("form", { class: "stack", onsubmit: onRestore },
-    h("p", {}, "Wczytaj kopię zapasową skarbca (plik pobrany przy zakładaniu tożsamości), a potem zaloguj się hasłem."),
-    field("Plik kopii", file),
-    field("Hasło skarbca kluczy", h("input", { id: "pass-restore", type: "password", autocomplete: "current-password", required: true })),
-    h("div", { class: "actions" }, h("button", { class: "btn primary", type: "submit", disabled: state.busy }, "Przywróć i zaloguj")));
-
-  mount(root,
-    h("h1", {}, "Zaloguj się kluczem"),
-    h("p", { class: "lead" }, "Logujesz się podpisem klucza z tej przeglądarki; hasło nie jest wysyłane na serwer."),
-    state.error && notice(state.error, "bad"),
-    state.has && !state.restoring ? unlock : restore,
-    state.has && h("p", { class: "muted" },
-      h("button", { class: "link", type: "button", onclick: () => { state.restoring = !state.restoring; state.error = null; render(); } },
-        state.restoring ? "Wróć do logowania" : "Wczytaj kopię zapasową zamiast tego")),
-    h("p", { class: "muted" }, "Nie masz tożsamości? ", h("a", { href: "/join" }, "Załóż ją"), "."));
-}
-
-async function finish(vault) {
-  const keys = vault.ofKind("auth");
-  if (keys.length === 0) throw new Error("W skarbcu nie ma klucza logowania.");
-  // próbujemy kolejnych kluczy logowania, aż serwer któryś zna
-  let last;
-  for (const key of keys) {
-    try {
-      await api.login(key, (message, priv) => sign("login", enc.encode(message), priv));
-      location.assign("/studio");
-      return;
-    } catch (e) {
-      last = e;
-      if (e.code !== "unknown_key") throw e;
-    }
-  }
-  throw new Error(`Serwer nie zna żadnego z kluczy logowania (${keys.map((k) => short(k.id)).join(", ")}). ${last?.message ?? ""}`);
-}
-
+const state = {
+  has: false,
+  restoring: new URLSearchParams(location.search).has("restore"),
+  busy: false,
+  error: null,
+  restored: null,
+  old: localVault(),
+  backupDownloaded: false,
+  restoreFile: null,
+};
+const ref = new URLSearchParams(location.search).get("ref");
+root.classList.add("auth-app");
+const header = () => [
+  h("p", { class: "eyebrow" }, "Klucze pozostają w przeglądarce"),
+  h("h1", {}, state.restoring ? "Przywróć skarbiec" : "Odblokuj klucze"),
+  h(
+    "p",
+    { class: "lead" },
+    "Odczyt jest otwarty. Hasło odblokowuje tylko lokalne klucze; nie tworzy sesji na serwerze.",
+  ),
+  state.error && notice(state.error, "bad"),
+];
+const btn = (label, fn) =>
+  h(
+    "button",
+    {
+      type: "button",
+      class: "btn",
+      disabled: state.busy,
+      onclick: () => run(fn),
+    },
+    label,
+  );
 async function run(fn) {
   if (state.busy) return;
   state.busy = true;
   state.error = null;
-  render();
   try {
     await fn();
   } catch (e) {
-    state.error = e instanceof WrongPassphrase ? e.message : e.message;
+    state.error = e.message;
+  } finally {
     state.busy = false;
     render();
   }
 }
-
-// Wartości pól czytamy zanim `run` przerysuje formularz (render tworzy puste pola).
-const onLogin = (e) => {
-  e.preventDefault();
-  const pass = document.getElementById("pass").value;
-  return run(async () => finish(await Vault.unlock(pass)));
-};
-
-const onRestore = (e) => {
-  e.preventDefault();
-  const f = document.getElementById("backup").files[0];
-  const pass = document.getElementById("pass-restore").value;
-  return run(async () => {
-    if (!f) throw new Error("Wybierz plik kopii zapasowej.");
-    let parsed;
-    try {
-      parsed = JSON.parse(await f.text());
-    } catch {
-      throw new Error("Plik nie jest poprawnym JSON-em.");
-    }
-    const vault = await restoreBackup(parsed, pass);
-    await vault.save();
-    await finish(vault);
+function render() {
+  if (root.dataset.page !== "login") return;
+  if (state.restored) return review();
+  const pass = h("input", {
+    id: "pass",
+    type: "password",
+    autocomplete: "current-password",
+    required: true,
   });
-};
-
-init().catch((e) => {
-  state.error = e.message;
+  const backup = h("input", {
+    id: "backup",
+    type: "file",
+    accept: "application/json,.json",
+    required: true,
+  });
+  if (state.restoreFile) {
+    const dt = new DataTransfer();
+    dt.items.add(state.restoreFile);
+    backup.files = dt.files;
+  }
+  backup.addEventListener("change", () => {
+    state.restoreFile = backup.files[0] || null;
+  });
+  const form = h(
+    "form",
+    {
+      class: "stack",
+      id: state.restoring ? "restore-check" : "unlock-vault",
+      onsubmit: (e) => {
+        e.preventDefault();
+        const secret = pass.value;
+        const file = backup.files[0];
+        run(async () => {
+          if (state.restoring) {
+            if (!file || file.size > 5 * 1024 * 1024)
+              throw new Error("Wybierz kopię JSON o rozmiarze do 5 MiB.");
+            let parsed;
+            try {
+              parsed = JSON.parse(await file.text());
+            } catch {
+              throw new Error("Plik nie jest poprawnym JSON-em.");
+            }
+            state.restored = await restoreBackup(parsed, secret);
+            pass.value = "";
+          } else {
+            const vault = await Vault.unlock(secret);
+            pass.value = "";
+            rememberVault(vault);
+            await enterStudio(
+              vault,
+              ref || vault.keys.find((k) => k.identity)?.identity,
+            );
+          }
+        });
+      },
+    },
+    state.restoring && field("Zaszyfrowana kopia", backup),
+    field("Hasło skarbca", pass),
+    h(
+      "button",
+      { type: "submit", class: "btn primary", disabled: state.busy },
+      state.busy
+        ? "Sprawdzanie…"
+        : state.restoring
+          ? "Sprawdź kopię bez zastępowania"
+          : "Odblokuj lokalnie",
+    ),
+  );
+  mount(
+    root,
+    ...header(),
+    form,
+    state.has &&
+      btn(
+        state.restoring
+          ? "Mam skarbiec: wróć do odblokowania"
+          : "Wczytaj kopię zapasową",
+        async () => {
+          state.restoring = !state.restoring;
+          state.error = null;
+        },
+      ),
+    h(
+      "details",
+      {},
+      h("summary", {}, "Nie pamiętam hasła lub nie mam kluczy"),
+      h(
+        "p",
+        {},
+        "Serwer nie zna hasła i nie może go zresetować. Sprawdź kopię, inną przeglądarkę lub inne nadal uprawnione klucze. Nowa tożsamość nie jest odzyskaniem starej.",
+      ),
+    ),
+    h(
+      "div",
+      { class: "actions" },
+      h("a", { class: "btn", href: "/studio" }, "Przeglądaj bez kluczy"),
+      h("a", { class: "btn", href: "/join" }, "Nowa tożsamość"),
+    ),
+  );
+}
+function review() {
+  const risk = h("input", { id: "restore-risk", type: "checkbox" });
+  const typed = h("input", {
+    id: "restore-confirm",
+    autocomplete: "off",
+    placeholder: state.has ? "ZASTĄP" : "",
+    required: state.has,
+  });
+  const lost = state.old?.keys.filter((k) => !state.restored.get(k.id));
+  const copy = h("input", {
+    id: "old-backup-saved",
+    type: "checkbox",
+    disabled: !state.backupDownloaded,
+  });
+  const submit = h(
+    "button",
+    {
+      id: "restore-save",
+      type: "submit",
+      class: "btn danger",
+      disabled: state.busy,
+    },
+    state.has ? "Zastąp lokalny skarbiec" : "Zapisz skarbiec lokalnie",
+  );
+  mount(
+    root,
+    ...header(),
+    h(
+      "section",
+      { class: "panel" },
+      h("h2", {}, "Kopia została sprawdzona"),
+      h("p", {}, "Klucze w kopii: " + state.restored.keys.length),
+      h(
+        "ul",
+        { class: "res-list" },
+        state.restored.keys.map((k) =>
+          h(
+            "li",
+            {},
+            k.kind === "signing" ? "Sygnowanie: " : "Autoryzacja: ",
+            h("code", {}, k.id),
+          ),
+        ),
+      ),
+      state.has &&
+        notice(
+          state.old
+            ? lost.length
+              ? "Klucze nieobecne w kopii: " +
+                lost.map((k) => k.label || short(k.id)).join(", ")
+              : "W kopii są wszystkie porównane klucze."
+            : "Obecny skarbiec jest zablokowany. Nie znamy jego zawartości i nie możemy porównać kluczy.",
+          "warn",
+        ),
+      state.has &&
+        !state.old &&
+        btn("Odblokuj obecny skarbiec do porównania", async () => {
+          state.old = (await unlockDialog()) || null;
+        }),
+      state.old &&
+        btn("Pobierz kopię obecnego skarbca", async () => {
+          download(
+            "oktavarium-przed-przywroceniem.json",
+            await state.old.backupFile(),
+          );
+          state.backupDownloaded = true;
+        }),
+    ),
+    h(
+      "form",
+      {
+        id: "restore-review",
+        class: "stack",
+        onsubmit: (e) => {
+          e.preventDefault();
+          if (state.has && typed.value !== "ZASTĄP") {
+            state.error = "Wpisz ZASTĄP, aby potwierdzić zastąpienie.";
+            render();
+            return;
+          }
+          if (state.has && !risk.checked && !copy.checked) {
+            state.error =
+              "Potwierdź zachowanie kopii albo ryzyko utraty obecnych lokalnych kluczy.";
+            render();
+            return;
+          }
+          run(async () => {
+            await state.restored.save();
+            rememberVault(state.restored);
+            await enterStudio(
+              state.restored,
+              ref || state.restored.keys.find((k) => k.identity)?.identity,
+            );
+          });
+        },
+      },
+      state.has &&
+        h(
+          "label",
+          { class: "check" },
+          copy,
+          " Zapisano kopię obecnego skarbca w bezpiecznym miejscu.",
+        ),
+      state.has &&
+        h(
+          "label",
+          { class: "check" },
+          risk,
+          " Rozumiem ryzyko utraty kluczy, których nie ma w przywracanej kopii.",
+        ),
+      state.has && field("Potwierdzenie zastąpienia", typed),
+      notice(
+        "To lokalna operacja. Nie odwołuje kluczy na serwerze i nie przywraca usuniętych bajtów publikacji.",
+      ),
+      submit,
+    ),
+    btn("Anuluj bez zastępowania", async () => {
+      state.restored = null;
+      state.error = null;
+      state.backupDownloaded = false;
+    }),
+  );
+}
+(async () => {
+  state.has = await hasVault();
+  if (!state.has) state.restoring = true;
   render();
-});
+})().catch((e) =>
+  mount(root, h("h1", {}, "Skarbiec"), notice(e.message, "bad")),
+);

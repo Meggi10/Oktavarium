@@ -33,4 +33,5 @@ export function hex(bytes) {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export const short = (id) => (id && id.length > 14 ? id.slice(0, 6) + "…" + id.slice(-5) : id || "");
+export const short = (id) =>
+  id && id.length > 14 ? id.slice(0, 6) + "…" + id.slice(-5) : id || "";

@@ -12,17 +12,30 @@ const DOMAIN = {
 export async function generateKey(kind, label) {
   const priv = crypto.getRandomValues(new Uint8Array(32));
   const pub = await ed.getPublicKeyAsync(priv);
-  return { id: b64u(pub), kind, private: b64u(priv), label: label || null, created: Date.now() };
+  return {
+    id: b64u(pub),
+    kind,
+    private: b64u(priv),
+    label: label || null,
+    created: Date.now(),
+  };
 }
 
 /** Podpis `message` (bajty) w domenie; zwraca base64url. */
 export async function sign(domain, message, privateB64) {
-  const sig = await ed.signAsync(concat(enc.encode(DOMAIN[domain]), message), unb64u(privateB64));
+  const sig = await ed.signAsync(
+    concat(enc.encode(DOMAIN[domain]), message),
+    unb64u(privateB64),
+  );
   return b64u(sig);
 }
 
 export async function verify(domain, message, signatureB64, keyId) {
-  return ed.verifyAsync(unb64u(signatureB64), concat(enc.encode(DOMAIN[domain]), message), unb64u(keyId));
+  return ed.verifyAsync(
+    unb64u(signatureB64),
+    concat(enc.encode(DOMAIN[domain]), message),
+    unb64u(keyId),
+  );
 }
 
 export async function sha256(bytes) {
