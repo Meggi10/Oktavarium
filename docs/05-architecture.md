@@ -10,9 +10,9 @@ Część od sekcji "Model domeny" w dół to rozwinięta wersja wcześniejszego 
 Oktavarium to jedna aplikacja Elixir (OTP) o trzech warstwach. Zależności idą tylko w dół.
 
 ```
-  przeglądarka            CLI (mix oktavarium.*)        operator (mix oktavarium.ingest / rebuild)
-       |  GET (HTML)           |  POST /api/events            |  bezpośrednio do bazy
-       v                       v                              v
+  przeglądarka lub CLI                           operator (mix oktavarium.ingest / rebuild)
+       |  HTTP / JSON / podpisane koperty                     |  bezpośrednio do bazy
+       v                                                      v
 +----------------------------------------------------+   +-------------------------+
 | Warstwa webowa  OktavariumWeb.*                    |   | Zadania Mix             |
 |  Endpoint -> Router -> kontrolery / widoki HEEx    |   |  Mix.Tasks.Oktavarium.* |
@@ -90,21 +90,33 @@ oktavarium/
   lib/
     oktavarium.ex           opis warstw
     oktavarium/             DOMENA (bez zależności od Phoenixa)
-      TODO
+      log.ex, log/          przyjmowanie i sprawdzanie podpisanych operacji
+      blobs.ex, blobs/, resources.ex, resources/, projects.ex, repo.ex, content.ex
+                            zasoby danych, projekty i multimedia
+      authz.ex, access.ex, invites.ex, invites/, keys/, sessions.ex
+                            klucze, sesja przeglądarki i autoryzacja
+      cli.ex, cli/          narzędzia CLI dla API
+      replay.ex             weryfikacja i odbudowa stanu z dzienników
+      capability.ex, delegation.ex, grants/
+                            zakresy uprawnień i łańcuchy grantów
     oktavarium_web/         WARSTWA WEBOWA
-      endpoint.ex, router.ex
+      auth.ex, endpoint.ex, router.ex, site_plug.ex
       controllers/          kontrolery i widoki (page_*, identity_*, event_controller, error_*, layouts)
-      components.ex         współdzielone komponenty (skracanie identyfikatorów, czas, odmiana liczebników, komponent klucza)
-      api_error.ex          mapowanie błędów domeny na JSON i status HTTP
+      components.ex, public_components.ex
+                            współdzielone komponenty (skracanie identyfikatorów, czas, odmiana liczebników, komponent klucza)
+      api_error.ex, error_json.ex, not_found_error.ex
+      mapowanie błędów domeny na JSON i status HTTP
     oktavarium_web.ex       wspólne `use` dla kontrolerów i widoków
     mix/oktavarium.ex       wspólny start repozytorium dla zadań operatora
     mix/tasks/              oktavarium.key.gen|key.show|identity.create|grant|profile|
                             event.verify|submit|ingest|rebuild
   priv/
-    repo/migrations/        identities, keys, events, grants, delegable
-    static/                 assets/app.css, favicon.svg, robots.txt
+    repo/migrations/        migracje bazy danych: identities, keys, events, grants, delegable
+    static/                 assets/app.css, assets/js/*, favicon.svg, robots.txt
   test/
     oktavarium/, oktavarium_web/, mix/  testy odpowiadające strukturze lib/
+    e2e/                    testy end-to-end w Pythonie dla przeglądarki
+    js/                     testy JavaScript `node --test test/js/*_test.mjs`
     support/                DataCase, ConnCase, Fixtures
   docs/                     dokumentacja zgodnie z założeniami zajęć projektowych
 ```
@@ -118,53 +130,135 @@ zapis zdarzeń w `event_controller`);
 
 ## Stan, komunikacja i przepływ danych
 
-Na dzień dzisiejszy **stan po stronie klienta nie istnieje.**
-Strony są renderowane na serwerze przy każdym żądaniu;
-nie ma sesji, ciasteczek, formularzy ani skryptów;
-Klient piszący trzyma tylko pliki kluczy i pliki kopert (`events/*.json`)
-z których bierze `seq` i `prev` kolejnego zdarzenia.
+### Odczyt
 
-**Stan po stronie serwera** ma jedno źródło prawdy:
+Użytkownik otwiera stronę -> kontroler pobiera aktualne dane z SQLite -> Phoenix renderuje HTML. 
+Przy odczycie z Pracowni JavaScript pobiera dane przez publiczne API.
 
-* `events` - podpisane zdarzenia (surowe bajty); **niezmienne**, tylko dopisywane;
-* tabele projekcji (`identifiers`, `keys`, `identity_auth_keys`, `grants`) - 
-    wyliczone ze zdarzeń w tej samej transakcji, w której zdarzenie zapisano; da się je odtworzyć z dzienników.
+**`unlisted` działa tak samo jak `public` przy odczycie po adresie.** 
+Różnica polega tylko na tym, że nie jest uwzględniane w publicznych katalogach.
 
-**Komunikacja:**
+### Zapis zwykłej zmiany
 
-* klient -> serwer: `GET .../head` po `seq` i `prev`; `POST /api/events` z kopertą;
-* operator -> baza: `mix oktavarium.ingest`, `mix oktavarium.rebuild` bez HTTP;
-* serwer -> serwer (federacja): poza MVP; dziennik pobierany przez `GET .../events` już w postaci gotowej do replikacji. 
+Przykład: zmiana opisu profilu.
 
-**Przepływ zapisu zdarzenia:**
+1. Przeglądarka zbiera tekst i pokazuje podsumowanie.
+2. Użytkownik zatwierdza zmianę i wybiera odpowiedni klucz sygnowania.
+3. Klient buduje zdarzenie z kolejnym numerem `seq` i wskazaniem `prev`.
+4. Podpisana koperta trafia do `POST /api/events`.
+5. Serwer sprawdza podpis, łańcuch, uprawnienia i dane operacji.
+6. Zdarzenie i wynikowa projekcja są zapisywane w jednej transakcji.
 
+Nie można zmienić starego zdarzenia. 
+Aktualizacja oznacza dopisanie nowego.
+
+### Publikowanie pliku
+
+W przypadku obrazu lub nagrania dochodzi osobny etap. 
+Po potwierdzeniu zamiaru klient uzyskuje w razie potrzeby sesję kluczem autoryzacji i przesyła bajty do `POST /api/blobs`.
+Serwer wylicza SHA-256 i zapisuje plik. Następnie klient podpisuje `resource.put`, 
+które wskazuje hash, rozmiar, typ i miejsce pliku.
+
+**Upload nie oznacza jeszcze publikacji.** 
+Dopiero zaakceptowane zdarzenie przypisuje plik do tożsamości lub projektu.
+
+## Model danych
+
+### Tożsamości i klucze
+
+Tożsamość powstaje ze zdarzenia `identity.genesis`. 
+Jego ID staje się stałym ID tożsamości. 
+Typy to **`person`** i **`collective`**. 
+Uchwyt jest opcjonalny; nazwa wyświetlana znajduje się w profilu i może się zmieniać bez zmiany ID.
+
+Rozdzielamy:
+
+- **klucze sygnowania**, które podpisują zdarzenia;
+- **klucze autoryzacji**, które pozwalają ustanowić sesję potrzebną np. do przesyłania bajtów;
+- **skarbce lokalne**, przechowywane w przeglądarce, a nie w bazie serwera.
+
+Klucz założycielski zachowuje pełne prawo do własnej tożsamości, również do funkcji dodanych później. Nie trzeba dopisywać mu nowych grantów.
+
+### Projekty i zasoby
+
+**Projekt to kontener zasobów należący do jednej tożsamości**, nie osobna tożsamość. 
+Jego ID powstaje przy `project.create`. Zmiana nazwy albo slugu nie zmienia ID.
+
+Zasób ma ID, typ, ścieżkę, opcjonalny `project_id`, hash pliku i metadane. 
+Obecne rodzaje to `image`, `audio` i `site`; projekt jest osobną pozycją typu `project` w tabeli zasobów.
+
+Przykładowe ścieżki wewnątrz projektu:
+
+```text
+images/plakat.png
+audio/peron.ogg
+site/index.html
+site/css/style.css
 ```
-CLI podpisuje kopertę --POST--> Router --> EventController
-                                              |  (parsowanie, bramka rejestracji)
-                                              v
-                                   Log.append(koperta)  [jedna transakcja BEGIN IMMEDIATE]
-                                     1. Envelope.verify  (podpis, struktura)
-                                     2. load_facts       (stan z bazy: głowa, grant, klucze)
-                                     3. Planner.plan     (czysta decyzja + lista operacji)
-                                        |> Authz         (uprawnienia, łańcuch grantów)
-                                     4. zapis: zdarzenie + projekcja
-                                              |
-                       201 {id, identity, seq, type}  albo  błąd {error:{code,…}} + status
+
+Plik w przestrzeni głównej nie ma `project_id`. 
+Zdjęcie profilowe jest obrazem pod `images/avatar` w tej właśnie przestrzeni. 
+Aktualizacja istniejącego zasobu może zachować jego ID nawet po przeniesieniu do innego projektu.
+
+### Granty i delegowanie
+
+Grant określa **klucz odbiorcy, akcję, zasób i ewentualne ograniczenie czasu**. 
+Może też pozwalać na dalsze delegowanie (`delegable`).
+
+Dla projektu zakres opiera się na **ID projektu**, np.:
+
+```text
+<ID_TOZSAMOSCI>/projects/<ID_PROJEKTU>/images/*
 ```
 
-**Obsługa błędów:** 
-domena zwraca krotki `{:ok, …}` / `{:error, powód}`; `OktavariumWeb.ApiError`
-zamienia powód na kod i status HTTP; strony używają `ErrorHTML`. Błędy zapisu nie zostawiają
-niczego w bazie (transakcja).
+Dzięki temu zmiana nazwy projektu nie przenosi uprawnień na przypadkowo inny projekt o takim samym slugu. 
+Przeniesienie zasobu wymaga prawa usuwania w źródle i publikowania w celu.
 
-**Współbieżność:** 
-zapisy do bazy serializuje `BEGIN IMMEDIATE`; unikalny indeks
-`(identity_id, seq)` jest drugim zabezpieczeniem przed rozwidleniem dziennika.
+Grant potomny nie może dawać więcej niż grant nadrzędny. 
+Gdy rodzic wygaśnie lub zostanie cofnięty, potomek przestaje działać. 
+Nie oznacza to usunięcia plików, które zostały wcześniej legalnie opublikowane.
 
-**Testowanie:** 
-rdzeń i planner bez bazy (czyste funkcje), `Log`, `Replay`, `Directory` na
-prawdziwej bazie SQLite z piaskownicą Ecto, API i strony przez `Phoenix.ConnTest`, 
-zadania Mix z podmienioną powłoką. 
+### Dzienniki i koperty
+
+Każda tożsamość ma **liniowy dziennik podpisanych zdarzeń**. 
+Zdarzenie zawiera m.in.:
+
+- `seq` — kolejny numer;
+- `prev` — ID poprzedniego zdarzenia;
+- `signer` — identyfikator klucza podpisującego;
+- `type` i `body` — rodzaj i dane operacji;
+- `ts` — czas zapisany przez klienta.
+
+Obecny format to **koperta v2**. 
+W tekście profilu oraz w metadanych projekty i zasoby przechowują w podpisanym 
+ładunku **referencje SHA-256**, zamiast całą historyczną treść. 
+Tekst może być dostarczony jako załącznik podczas zapisu; 
+później jest przechowywany poza niezmiennym dziennikiem.
+
+To ważny kompromis: **podpisana historia pozostaje**, 
+ale niepotrzebne bajty treści można usunąć z magazynu bez zmiany podpisanych zdarzeń. 
+Taki usunięty tekst lub plik nie będzie już możliwy do wyświetlenia; dziennik nadal przechowuje jego skrót.
+
+Dla plików obowiązuje SHA-256 zapisany jako 64 znaki szesnastkowe. 
+ID kluczy, zdarzeń i zasobów mają własną reprezentację base64url. 
+Nie należy mylić skróconego tekstu widocznego na stronie z pełnym identyfikatorem.
+
+### Odbudowa projekcji
+
+Tabele z aktualnym profilem, grantami, kluczami, projektami i zasobami są **projekcją** zdarzeń, czyli wygodnym bieżącym widokiem. `Oktavarium.Replay` może odtworzyć je na podstawie podpisanego dziennika.
+
+```sh
+mix oktavarium.rebuild           # porównanie, bez zatwierdzania zmian
+mix oktavarium.rebuild --apply   # zastosowanie odbudowanego stanu
+```
+
+Podczas odtwarzania sprawdzane są podpisy, kolejność i reguły. Historyczne uprawnienia ocenia się na podstawie czasu przyjęcia zdarzenia, tak aby późniejsze wygaśnięcie grantu nie unieważniało legalnej historii. Odbudowa wymaga zachowanych zdarzeń; nie przywróci utraconych bajtów plików.
+
+## Własne strony HTML/CSS/JS
+
+Pliki pod `site/` mogą tworzyć niezależną witrynę tożsamości lub projektu. Jeśli instancja ma ustawione `OKTAVARIUM_SITES_DOMAIN`, `SitePlug` podaje te pliki z **osobnego hosta**. Dla projektów adres jest wyprowadzany ze stabilnego ID, a nie ze slugu.
+
+Oddzielny host i nagłówki bezpieczeństwa ograniczają dostęp kodu autora do głównej aplikacji, sesji i lokalnego skarbca. Nie traktujemy wgrywanego HTML jako zaufanego kodu Pracowni.
 
 ## Model danych
 
@@ -177,17 +271,17 @@ Cechy takie jak strona główna, zasoby multimediów czy repozytorium git to mod
 które można włączyć dowolnej tożsamości. 
 Tożsamość może mieć rodzica (`parent_id`), np. bot podporządkowany projektowi.
 
-**Klucz sygnowania** (`Keys.Key`, `kind: :signing`):
+**Klucz sygnowania** (`Keys.IdentitySigningKey`):
 właściwa kryptograficzna tożsamość. 
 Podpisuje zdarzenia i granty. 
 Zawsze należy do dokładnie jednej tożsamości (może to być tożsamość o ograniczonym profilu). 
 Jedna tożsamość może mieć wiele kluczy sygnowania, różniących się uprawnieniami i ważnością.
 
-**Klucz autoryzacji** (`Keys.Key`, `kind: :auth`): 
+**Klucz autoryzacji** (`Keys.IdentityAuthKey`): 
 klucz logowania, np. passkey na jednym urządzeniu. 
 Podpisuje wyzwanie logowania (domena `:login`) i współpodpisuje operacje wrażliwe: 
 rotację kluczy sygnowania, odzyskiwanie konta, usunięcie konta. 
-Relacja z tożsamościami to wiele-do-wielu (`Keys.IdentityAuthKey`); 
+Relacja z tożsamościami to wiele-do-wielu;
 każda tożsamość potrzebuje co najmniej jednego aktywnego klucza autoryzacji.
 
 **Grant** (`Grants.Grant`): 
@@ -311,7 +405,7 @@ zdarzeniu (zmiana po zmianie, kolejność ustala `seq`).
 
 * **Genesis wymaga co najmniej jednego klucza autoryzacji** (`auth_keys`). 
     CLI tylko ostrzega, bo klient nie jest wiarygodny.
-* **Jeden klucz sygnowania należy do dokładnie jednej tożsamości** (jego „domu").
+* **Jeden klucz sygnowania należy do dokładnie jednej tożsamości** (jego "domu").
     Ten sam klucz nie założy drugiej tożsamości, a klucz sygnowania nie może być
     kluczem autoryzacji (i odwrotnie). Klucz autoryzacji można współdzielić między tożsamościami.
 * **Podmiot grantu musi być znanym kluczem sygnowania.** 
@@ -370,8 +464,6 @@ których jednak nie próbuje się rozwiązać w MVP projektu:
     co ograniczy zależność od zegara konkretnego serwera.
 * `visibility: restricted` ukrywa tylko w HTML, co daje pozorną prywatność.
     Być może powinniśmy to usunąć i dać wszystko publiczne, albo należałoby używać operacji szyfrujących.
-* Treści profilu na zawsze w dzienniku oznacza, że operator instancji nie może usunąć nielegalnej treści.
-    Rozwiązaniem powinno być to by dziennik commitował do skrótów, wtedy treść można usunąć bez zerwania łańcucha.
 * Klucze w lokalnych plikach 0600 to też kompromis MVP, prawdziwe bezpieczeństwo kryptograficzne 
     mogą dać tylko szyfrowanie hasłem, klucze sprzętowe, passkeys, co *może* zostanie zaimplementowane i w tym prototypie.
 * Prawdziwy model jak z systemu kontroli wersji 

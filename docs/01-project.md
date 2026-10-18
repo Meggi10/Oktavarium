@@ -2,18 +2,19 @@
 
 ## Temat
 
-**Oktavarium** to pseudo-anonimowa, samohosotwana platforma (z dostępem na zaproszenie).
+**Oktavarium** to pseudo-anonimowa, mała samohosotwana platforma (z dostępem na zaproszenie)
+dla osób szukających indywidualnej bądź kolektywnej przestrzeni do prezentacji i kolaboracji.
+
 Jej rdzeniem jest model danych, w którym **tożsamość to klucz kryptograficzny**,
 a uprawnienia są **podpisywanymi zdanymi**.
-
-Każda tożsamość (osoba, organizacja, projekt) prowadzi własny **dziennik podpisanych zdarzeń**,
-podobny do historii commitów w systemie kontroli wersji.
-Tabele w bazie i strony WWW są tylko widokiem (projekcją) tych dzienników.
+Każda ważna operacja ma podpis i trafia do dziennika danej tożsamości.
+Dzięki temu można sprawdzić co zostało zmienione, jakim kluczem i w jakich okolicznościach,
+jak i odtworzyć całą projekcję bazy danych i stron WWW według stanu dzienników.
 
 ## Problem i potrzeba
 
-Małe społeczności twórcze (grupa artystów, zespół gry, kolektyw muzyczny, otwarty projekt kolaboracyjny)
-zwykle składają swoją obecność z kilku usług: portfolio, repozytoria kodu, kanały komunikacji, wiki/galerie.
+Małe społeczności (artyści, zespoły, otwarty projekt kolaboracyjny)
+zwykle składają swoją obecność z kilku usług: portfolio dla prezentacji, repozytoria kodu, kanały komunikacji, wiki/galerie.
 Z tego wynikają powtarzające się kłopoty:
 
 1. **Tożsamość i uprawnienia są cudze.**
@@ -23,14 +24,17 @@ Z tego wynikają powtarzające się kłopoty:
     zwykle oznacza nadanie komuś pełnej roli albo dzielenie się hasłem.
 2. **Brak dowodu, kto co zmienił.**
     Historia zmian profilu, uprawnień czy treści zależy od logów operatora i nie da się jej niezależnie sprawdzić.
-    Niektóre platformy mogą nawet takich logów nie prowadzić, utrzymując jedynie obecny stan rzeczy.
-    Jeżeli taki dziennik jest prowadzony, nie jest on publiczny do odczytu.
-3. **Zależność od jednego dostawny.**
+    Niektóre platformy mogą nawet takich logów nie prowadzić, utrzymując jedynie obecny stan rzeczy, 
+    albo pozwalając na zakłamanie jego stanu przez modyfikacje przez administratora.
+    Jeżeli taki dziennik jest prowadzony, rzadko kiedy jest on publiczny do odczytu.
+3. **Zależność od jednego dostawcy.**
     Przeniesienie społeczności na inną instancję albo odtworzenie jej po awarii (lub ataku)
-    oznacza ręczne odbudowywanie kont i ról, kanałów komunikacji, 
-    oraz utrata istniejących treści czy nawet dzienników.
+    oznacza ręczne odbudowywanie ról, kanałów komunikacji, oraz utrata istniejących treści czy nawet dzienników.
+    Jeżeli to platforma uległa awarii, często oznacza to też utrata istniejących kont.
 4. **Uzależnienie od zasad użytkowania operatora usługi.**
-    Jeżeli społeczność chce pracować na własnych zasadach, pozostać całkowicie anonimowa jeśli trzeba,
+    Jeżeli społeczność chce pracować na własnych zasadach, 
+    pozostać całkowicie anonimowa jeśli trzeba,
+    kontrolować to kto ma prawo wchodzić w interakcję ze społecznością,
     może być to niemożliwe na ogólnodostępnych platformach;
     nie wnikając w postępujące metody weryfikacji wieku, czy ograniczenia nałożone przez usługodawców,
     którzy chcąc nam coś sprzedać są administratorami danych wrażliwych.
@@ -81,8 +85,8 @@ tysiące, jak nie _setki_ użytkowników; (żart celowy).
 * serwer HTTP: REST API do zapisu i odczytu dzienników oraz publiczne strony 
     (katalogi tożsamości oraz ich zasobów, profil tożsamości z uprawnieniami i historią);
 * narzędzia operatora: wczytywanie kopert do bazy, sprawdzanie i odbudowa projekcji;
-* zarządzie kluczami, zaproszenia, autoryzacja/logowanie w przeglądarce;
-* edycja profilu w przeglądarce;
-* zasoby tożsamości (obrazy, audio, HTML/CSS/JS, repozytoria GIT);
+* zarządzie kluczami, zaproszenia, autoryzacja/odblokowanie kluczy w przeglądarce;
+* edycja profilu i zasobów w przeglądarce;
+* zasoby tożsamości (obrazy, audio, HTML/CSS/JS);
 
 Szczegóły i priorytety: [02-requirements.md](02-requirements.md).

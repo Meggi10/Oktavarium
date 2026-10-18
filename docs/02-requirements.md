@@ -146,121 +146,100 @@ próba nadania szerszego lub dłuższego jest odrzucana (`not_covered`, `window_
     (kod wyjścia `!= 0` przy rozbieżności). Po awarii albo ręcznej edycji bazy naprawia ją `mix oktavarium.rebuild --apply`.
 4. Wykonuje kopię zapasową pliku SQLite. Dziennik zdarzeń jest wystarczającym źródłem prawdy, więc projekcję zawsze można odtworzyć.
 
-### P6. Zaproszenie nowej osoby (planowane)
-
-Platforma jest z założenia zamknięta. Docelowo zaproszenie jest grantem `identity.create` wystawionym przez klucz platformy:
-zaproszona osoba podpisuje genesis, a serwer akceptuje go dla zaproszenia z ograniczonym użyciem i czasem.
-Do tego momentu rolę zaproszenia pełni operator (P1, krok 4).
-
-### P7. Autoryzacja sesji i praca w przeglądarce (planowane)
-
-Wyzwanie logowania podpisane kluczem autoryzacji (domena `oktavarium/login/v1`), sesja,
-edycja profilu w przeglądarce. Dopóki klucze prywatne żyją w CLI, strony mogą być tylko do odczytu.
-Chcemy jednak aby możliwa była edycja w przeglądarce, więc klucze prywatne powinny 
-też móc istnieć w przeglądarce i być eksportowane do lub importowane z CLI.
-
 ## Wymagania funkcjonalne
 
 Priorytet: 
 **MVP** niezbędne do obsługi procesów P1-P5 i do obietnicy "zamknięta platforma z weryfikowalnymi uprawnieniami";
-**Dodatkowe** rozszerzają platformę.
+**Dodatkowe** rozszerzają platformę, mogą nie być do końca zaimplementowane.
 
 ### Tożsamości i klucze
 
-| Wymaganie | Priorytet | Status |
-| --------- | --------- | ------ |
-| Generowanie kluczy Ed25519 (sygnowania i autoryzacji) do pliku z uprawnieniami 0600, bez nadpisywania istniejących plików | MVP | planowane |
-| Założenie tożsamości zdarzeniem genesis: rodzaj (`user`, `org`, `project`), opcjonalny uchwyt (a-z, 0-9. `_`, `-`, 2-32 znaki), co najmniej jeden klucz autoryzacji | MVP | planowane |
-| Identyfikator tożsamości to skrót zdarzenia genesis (niezależny od serwera) | MVP | planowane |
-| Jeden klucz sygnowania należy do dokładnie jednej tożsamości; ten sam klucz nie może być jednocześnie kluczem sygnowania i autoryzacji | MVP | planowane |
-| Unikalność uchwytów | MVP | planowane |
-| Dodawanie i unieważnianie kluczy (rotacja, utrata urządzenia) | MVP | planowane |
-| Zmiana uchwytu | Dodatkowe | planowane |
-| Tożsamość podporządkowana (`parent`), np. bot w projekcie | Dodatkowe | planowane |
+| Wymaganie | Priorytet |
+| --------- | --------- |
+| Generowanie kluczy Ed25519 (sygnowania i autoryzacji) do pliku z uprawnieniami 0600, bez nadpisywania istniejących plików | MVP |
+| Założenie tożsamości zdarzeniem genesis: rodzaj (`user`, `org`, `project`), opcjonalny uchwyt (a-z, 0-9. `_`, `-`, 2-32 znaki), co najmniej jeden klucz autoryzacji | MVP |
+| Identyfikator tożsamości to skrót zdarzenia genesis (niezależny od serwera) | MVP |
+| Jeden klucz sygnowania należy do dokładnie jednej tożsamości; ten sam klucz nie może być jednocześnie kluczem sygnowania i autoryzacji | MVP |
+| Unikalność uchwytów | MVP |
+| Dodawanie i unieważnianie kluczy (rotacja, utrata urządzenia) | MVP |
+| Zmiana uchwytu | Dodatkowe |
+| Tożsamość podporządkowana (`parent`), np. bot w projekcie | Dodatkowe |
 
 ### Uprawnienia ("granty")
 
-| Wymaganie | Priorytet | Status |
-| --------- | --------- | ------ |
-| Nadanie uprawnienia: podmiot (znany klucz sygnowania), akcja, zasób, opcjonalne okno czasowe (`not_before`, `expires_at`) | MVP | planowane |
-| Wzorce akcji i zasobów z symbolem `*`; zasób musi należeć do przestrzeni tożsamości, w której wystawiono grant | MVP | planowane |
-| Właściciel nadaje dowolny grant; delegat tylko na podstawie własnego grantu `delegable` | MVP | planowane |
-| Zawężanie (attenuation): pochodny grant nie może mieć szerszego zakresu ani dłuższego okna niż nadrzędny | MVP | planowane |
-| Ważność grantu zależy od całego łańcucha do klucza założycielskiego; wygaśnięcie lub unieważnienie ogniwa odcina pochodne | MVP | planowane |
-| Ważność oceniana według czasu serwera, nie czasu z koperty | MVP | planowane |
-| Unieważnienie grantu zdarzeniem `grant.revoke` | MVP | planowane |
-| Zaproszenia jako granty (`identity.create` od klucza platformy, z limitem użyć) | MVP | planowane |
+| Wymaganie | Priorytet |
+| --------- | --------- |
+| Nadanie uprawnienia: podmiot (znany klucz sygnowania), akcja, zasób, opcjonalne okno czasowe (`not_before`, `expires_at`) | MVP |
+| Wzorce akcji i zasobów z symbolem `*`; zasób musi należeć do przestrzeni tożsamości, w której wystawiono grant | MVP |
+| Właściciel nadaje dowolny grant; delegat tylko na podstawie własnego grantu `delegable` | MVP |
+| Zawężanie (attenuation): pochodny grant nie może mieć szerszego zakresu ani dłuższego okna niż nadrzędny | MVP |
+| Ważność grantu zależy od całego łańcucha do klucza założycielskiego; wygaśnięcie lub unieważnienie ogniwa odcina pochodne | MVP |
+| Ważność oceniana według czasu serwera, nie czasu z koperty | MVP |
+| Unieważnienie grantu zdarzeniem `grant.revoke` | MVP |
+| Zaproszenia jako granty (`identity.create` od klucza platformy, z limitem użyć) | MVP |
 
 ### Dziennik zdarzeń
 
-| Wymaganie | Priorytet | Status |
-| --------- | --------- | ------ |
-| Każda tożsamość ma własny dziennik: zdarzenia numerowane `seq`, łańcuch `prev`, brak rozwidleń i powtórzeń | MVP | planowane |
-| Zdarzenie jest podpisane (Ed25519, osobna domena podpisu), a serwer przechowuje surowe, podpisane bajty bez ponownej serializacji | MVP | planowane |
-| Zapis atomowy: zdarzenie i jego projekcja zapisują się razem albo wcale | MVP | planowane |
-| Weryfikacja dziennika od zera wyłącznie z zapisanych bajtów (`Log.verify`), także po stronie klienta (`mix oktavarium.event.verify`) | MVP | planowane |
-| Odbudowa projekcji z dzienników: sprawdzanie rozbieżności i naprawa (`mix oktavarium.rebuild`) | MVP | planowane |
-| Ponawianie zapisu po konflikcie `bad_seq` (pobranie głowy i ponowne podpisanie) | MVP | planowane |
-| Współpodpisywanie operacji wrażliwych kluczem autoryzacji | Dodatkowe | planowane |
-| Replikacja dzienników między instancjami (federacja) | Dodatkowe | planowane |
+| Wymaganie | Priorytet |
+| --------- | --------- |
+| Każda tożsamość ma własny dziennik: zdarzenia numerowane `seq`, łańcuch `prev`, brak rozwidleń i powtórzeń | MVP |
+| Zdarzenie jest podpisane (Ed25519, osobna domena podpisu), a serwer przechowuje surowe, podpisane bajty bez ponownej serializacji | MVP |
+| Zapis atomowy: zdarzenie i jego projekcja zapisują się razem albo wcale | MVP |
+| Weryfikacja dziennika od zera wyłącznie z zapisanych bajtów (`Log.verify`), także po stronie klienta (`mix oktavarium.event.verify`) | MVP |
+| Odbudowa projekcji z dzienników: sprawdzanie rozbieżności i naprawa (`mix oktavarium.rebuild`) | MVP |
+| Ponawianie zapisu po konflikcie `bad_seq` (pobranie głowy i ponowne podpisanie) | MVP |
+| Współpodpisywanie operacji wrażliwych kluczem autoryzacji | Dodatkowe |
+| Replikacja dzienników między instancjami (federacja) | Dodatkowe |
 
 ### Profil
 
-| Wymaganie | Priorytet | Status |
-| --------- | --------- | ------ |
-| Zdarzenie `profile.update` zmienia pola `display_name` (<= 80 znaków, jedna linia), `bio` (<= 2000, wiele linii), `location` (<= 80), `website` (<= 200 http/https); `null` usuwa pole | MVP | planowane |
-| Każde pole to osobny zasób `<id>/profile/<field>`; właściciel zmienia wszystkie, delegat tylko te objęte grantem; jedno niedozwolone pole odrzuca całe zdarzenie | MVP | planowane |
-| Walidacja: zamknięty zestaw pól, zakaz znaków sterujących, pusty tekst jest błędem | MVP | planowane |
-| Awatar, linki do innych usług, dodatkowe pola | Dodatkowe | planowane |
-| Zasoby (obrazy, audio, HTML/CSS/JS, repozytoria GIT) | Dodatkowe | planowane |
+| Wymaganie | Priorytet |
+| --------- | --------- |
+| Zdarzenie `profile.update` zmienia pola `display_name` (<= 80 znaków, jedna linia), `bio` (<= 2000, wiele linii), `location` (<= 80), `website` (<= 200 http/https); `null` usuwa pole | MVP |
+| Każde pole to osobny zasób `<id>/profile/<field>`; właściciel zmienia wszystkie, delegat tylko te objęte grantem; jedno niedozwolone pole odrzuca całe zdarzenie | MVP |
+| Walidacja: zamknięty zestaw pól, zakaz znaków sterujących, pusty tekst jest błędem | MVP |
+| Awatar, linki do innych usług, dodatkowe pola | Dodatkowe |
+| Zasoby (obrazy, audio, HTML/CSS/JS, repozytoria GIT) | Dodatkowe |
 
 ### Przeglądanie (strony publiczne)
 
-| Wymaganie | Priorytet | Status |
-| --------- | --------- | ------ |
-| Katalog tożsamości: nazwa, uchwyt, początek opisu, rodzaj, liczba zdarzeń, skrót głowy; stan pusty z instrukcją | MVP | planowane |
-| Strona tożsamości pod uchwytem lub identyfikatorem; adres z identyfikatorem przekierowuje na adres z uchwytem | MVP | planowane |
-| Na stronie: profil, dane identyfikacyjne, klucze publiczne, tabela uprawnień ze stanem (aktywny, unieważniony, wygasły, oczekujący, uszkodzony łańcuch), dziennik ze stronicowaniem | MVP | planowane |
-| Wskaźnik integralności dziennika (serwer weryfikuje podpisy i łańcuch przy każdym wyświetleniu) oraz odnosnik do pobrania JSON | MVP | planowane |
-| Wyszukiwanie tożsamości po nazwie, uchwycie, rodzaju | MVP | planowane |
-| Strony projektów, zasobów, repozytoriów i moduły tożsamości (strona główna, pliki) | Dodatkowe | planowane |
-| Tożsamości o widoczności `restricted` ukryte w katalogu (dziś ukrywane na stronach, ale nie w API) | Dodatkowe | planowane |
-
-### API i narzędzia operatora
-
-| Wymaganie | Priorytet | Status |
-| --------- | --------- | ------ |
-| `POST /api/events` przyjmuje kopertę, odpowiada 201 albno ustruktyzowanym błędem JSON z właściwym statusem | MVP | planowane |
-| `GET /api/identities/:id/head` i `GET /api/identities/:id/events?after=N` | MVP | planowane |
-| Przełącznik rejestracji (`registration: :open / :closed`), na produkcji domyślnie zamknięta | MVP | planowane |
-| `mix oktavarium.submit` (wysłanie kopert), `mix oktavarium.ingest` (wczytanie do bazy bez HTTP) | MVP | planowane |
-| Ograniczanie liczby żądań do API | MVP | planowane |
-| Szyfrowanie plików z kluczami prywatnymi hasłem | MVP | planowane |
-| Wydanie produkcyjne (release), instrukcja kopii zapasowych | MVP | planowane |
+| Wymaganie | Priorytet |
+| --------- | --------- |
+| Katalog tożsamości: nazwa, uchwyt, początek opisu, rodzaj, liczba zdarzeń, skrót głowy; stan pusty z instrukcją | MVP |
+| Strona tożsamości pod uchwytem lub identyfikatorem; adres z identyfikatorem przekierowuje na adres z uchwytem | MVP |
+| Na stronie: profil, dane identyfikacyjne, klucze publiczne, tabela uprawnień ze stanem (aktywny, unieważniony, wygasły, oczekujący, uszkodzony łańcuch), dziennik ze stronicowaniem | MVP |
+| Wskaźnik integralności dziennika (serwer weryfikuje podpisy i łańcuch przy każdym wyświetleniu) oraz odnosnik do pobrania JSON | MVP |
+| Wyszukiwanie tożsamości po nazwie, uchwycie, rodzaju | MVP |
+| Strony projektów, zasobów, repozytoriów i moduły tożsamości (strona główna, pliki) | Dodatkowe |
+| Tożsamości o widoczności `restricted` ukryte w katalogu (dziś ukrywane na stronach, ale nie w API) | Dodatkowe |
 
 ### Przeglądarka
 
-| Wymaganie | Priorytet | Status |
-| --------- | --------- | ------ |
-| Generowanie kluczy i podpisanie zdarzenia `genesis`, z użyciem ważnego zaproszenia (jeśli rejestracja zamknięta) w przeglądarce | MVP | planowane |
-| Logowanie w przeglądarce wyzwaniem podpisanym kluczem autoryzacji (passkey) i sesja | MVP | planowane |
-| Edycja profilu i zarządzanie uprawnieniami w przeglądarce | MVP | planowane |
+| Wymaganie | Priorytet |
+| --------- | --------- |
+| Generowanie kluczy i podpisanie zdarzenia `genesis`, z użyciem ważnego zaproszenia (jeśli rejestracja zamknięta, lub bez) w przeglądarce | MVP |
+| Autoryzacja sesji w przeglądarce podpisanym wyzwaniem (passkey) | MVP |
+| Edycja profilu i zarządzanie uprawnieniami w przeglądarce | MVP |
+| Edycja i dodawanie zasobów w przeglądarce | MVP |
 
 ## Poza zakresem MVP
 
 * federacja (replikacja dzienników między instancjami);
-* zasoby projektu: repozytoria git, obrazy, audio, HTML/CSS/JS;
+* repozytoria git jako zasoby projektu;
+* forkowanie i rewizja zasobów oraz stanu dzienników;
 * tryb awaryjnego odzyskiwania tożsamości przez administratora instancji 
     (odzyskiwanie ma iść przez atestację wyznaczonych kluczy, bez interfejsu);
 
 ## Powiązanie z kodem i testami
 
-| Obszar | Moduły | Testy |
-| ------ | ------ | ----- |
-| Koperty i podpisy | `Oktavarium.Crypto`, `Oktavarium.Envelope` | `crypto_test`, `envelope_test` |
-| Zakres uprawnień i delegowanie | `Oktavarium.Capability`, `Oktavarium.Delegation`, `Oktavarium.Authz` | `capability_test`, `delegation_test`, `authz_test` |
-| Przyjmowanie zdarzeń | `Oktavarium.Log`, `Oktavarium.Log.Planner` | `log_test`, `log_planner_test` |
-| Profil | `Oktavarium.Identities.Profile` | `identities_profile_test` |
-| Odbudowa projekcji | `Oktavarium.Replay` | `replay_test`, `mix/tasks/oktavarium_rebuild_test` |
-| CLI i zadania Mix | `Oktavarium.Cli`, `Mix.Tasks.Oktavarium.*` | `cli_test`, `oktavarium_tasks_test` |
-| API i strony | `OktavariumWeb.*`, `Oktavarium.Directory` | `oktavarium_web/api_test`, `pages_test`, `components_test`, `directory_test` |
+| Obszar | Gdzie szukać |
+| ------ | ------------ |
+| Koperty i podpisy | `Oktavarium.Crypto`, `Oktavarium.Envelope`, `Oktavarium.Keys.*` |
+| Zakres uprawnień i delegowanie | `Oktavarium.Capability`, `Oktavarium.Delegation`, `Oktavarium.Authz` |
+| Przyjmowanie zdarzeń | `Oktavarium.Log`, `Oktavarium.Log.Planner` |
+| Zaproszenia | `Oktavarium.Invites`, `Oktavarium.Invites.Invite` |
+| Profil | `Oktavarium.Identities.Profile` |
+| Zasoby i projekty | `Oktavarium.Blobs`, `Oktavarium.Resources`, `Oktavarium.Projects` |
+| Odbudowa projekcji | `Oktavarium.Replay` |
+| CLI i zadania Mix | `Oktavarium.Cli`, `Mix.Tasks.Oktavarium.*` |
+| API i strony | `OktavariumWeb.*`, `Oktavarium.Sessions`, `Oktavarium.Directory` |

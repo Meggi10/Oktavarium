@@ -2,9 +2,9 @@
 
 ## Wybór zaplecza danych
 
-Oktavarium ma **własny, lokalny backend**:
-aplikację Elixir/Phoenix z bazą SQLite w jednym pliku.
-Nie korzysta z żadnego zewnętrznego, publicznego API ani z usługi typu "backend jako usługa".
+Oktavarium ma własny backend w **Elixirze i Phoenix**. 
+Dane tabelaryczne trzyma w **SQLite**, a większe pliki w lokalnym magazynie blobów. 
+Nie korzysta z zewnętrznego systemu logowania ani gotowej usługi typu backend-as-a-service.
 Wszystkie zasoby opisane niżej wystawia sam projekt, co pozwala na zachowanie całkowitej lokalności instancji.
 
 ### Uzasadnienie
@@ -29,19 +29,23 @@ Wszystkie zasoby opisane niżej wystawia sam projekt, co pozwala na zachowanie c
 
 ### Co jest po stronie klienta
 
-Strony HTML renderuje serwer (bez JavaScriptu).
-Klient "piszący" to CLI w tym samym repozytorium (`mix oktavarium.*`), 
-które podpisuje zdarzenia lokalnie i wysyła je przez `POST /api/events`.
-Przeglądarka jest szczególnym rodzajem klienta, który korzysta z tego samego API, co narzędzie CLI.
+Strony HTML renderuje serwer, JavaScript jest używany dla funkcji autoryzacji sesji, podpisywania i edycji.
+Klient "piszący" to CLI w tym samym repozytorium (`mix oktavarium.*`),
+albo autoryzowana sesja w przeglądarce, 
+który podpisuje zdarzenia lokalnie i wysyła je przez `POST /api/events`.
+Przeglądarka jest szczególnym rodzajem klienta, który korzysta z tego samego API, co narzędzie CLI, 
+którego klucze autoryzacji i sygnowania trzymane są zaszyfrowane i lokalnie.
 
 ## Zasoby
 
-| Zasób | Opis | Identyfikacja |
-| ----- | ---- | ------------- |
-| Tożsamość | użytkownik / maszyna / organizacja / projekt | `id` (skrót zdarzenia genesis, base64url) albo `handle` |
-| Zdarzenie | podpisana zmiana w dzienniku tożsamości | `id` (skrót ładunku), para `(identity, seq)` |
-| Głowa dziennika | `seq` i `id` ostatniego zdarzenia; potrzebne do podpisania następnego | `id` tożsamości |
-| Koperta | postać zdarzenia w sieci: `payload`, `signer`, `signature` (base64url) | -- |
+| Zasób | Co oznacza |
+| ----- | ---------- |
+| **Tożsamość** | Osoba albo kolektyw. Ma stałe ID, opcjonalny uchwyt, profil i własny dziennik. |
+| **Projekt** | Kontener zasobów należący do tożsamości. Ma stabilne ID i zmienialny slug. |
+| **Zasób** | Obraz, nagranie lub plik strony; ma ID, ścieżkę, hash i metadane. |
+| **Blob** | Bajty pliku opisane skrótem SHA-256. |
+| **Zdarzenie** | Podpisana operacja zmieniająca stan. |
+| **Grant** | Zapis mówiący, który klucz może wykonać jaką czynność i gdzie. |
 
 Typy zdarzeń (pole `type` w ładunku):
 `identity.genesis`, `grant.create`, `profile.update`.
@@ -49,151 +53,142 @@ Treść każdego opisuje [05-architecture.md](05-architecture.md), "Typy zdarze�
 
 ## Endpointy
 
-Dwie grupy tras: strony dla ludzi (HTML) i API dla programów (JSON).
+### Publiczne strony HTML
 
-### API (JSON)
+| Metoda | Ścieżka | Opis |
+| --- | --- | --- |
+| `GET` | `/` | Odkrywaj. Filtry przez `?view=images`, `audio`, `projects`, `people`. |
+| `GET` | `/i/:ref` | Profil osoby lub kolektywu po uchwycie albo ID. |
+| `GET` | `/i/:ref/projects/:project_id` | Publiczny widok projektu. |
+| `GET` | `/join` | Formularz tworzenia tożsamości. |
+| `GET` | `/login` | Odblokowanie i przywracanie skarbca. |
+| `GET` | `/studio` | Pracownia. |
 
-| Metoda | Ścieżka | Uwierzytelnienie | Opis |
-| ------ | ------- | ---------------- | ---- |
-| `POST` | `/api/events` | podpis w kopercie | dopisuje zdarzenie do dziennika; genesis zakłada tożsamość |
-| `GET` | `/api/identities/:id/head` | brak (publiczne) | głowa dziennika: `seq` i `id` ostatniego zdarzenia |
-| `GET` | `/api/identities/:id/events?after=N` | brak (publiczne) | koperty zdarzeń o `seq > N` (domyślnie wszystkie) |
+### Odczyt API (JSON)
 
-Brak `PUT`, `PATCH` i `DELETE`:
-zdarzeń się nie zmienia ani nie usuwa.
-Zmiana stanu to zawsze **nowe** zdarzenie dopisane na końcu dziennika,
-widoczna zmiana wynika z projekcji tego dziennika (jego prezentacja).
+| Metoda | Ścieżka | Opis |
+| --- | --- | --- |
+| `GET` | `/api/identities` | Katalog tożsamości `public` (bez `unlisted`). |
+| `GET` | `/api/identities/:ref` | Profil, zasoby, projekty, klucze publiczne, granty i stan dziennika. |
+| `GET` | `/api/identities/:ref/projects` | Projekty danej tożsamości. |
+| `GET` | `/api/identities/:ref/projects/:project_id` | Szczegóły projektu i jego zasoby. |
+| `GET` | `/api/identities/:ref/access/:key` | Informacja o uprawnieniach klucza. **Nie jest to token zapisu.** |
+| `GET` | `/api/identities/:id/head` | Numer i ID ostatniego zdarzenia. |
+| `GET` | `/api/identities/:id/events?after=N` | Podpisane koperty zdarzeń od podanego miejsca. |
+| `GET` | `/api/identities/:id/events/:event_id` | Sprawdzenie, czy konkretne zdarzenie znajduje się w dzienniku. |
+| `GET` | `/api/identities/:ref/resources/:resource_id/download` | Pobranie pliku jako załącznika. |
+| `GET` | `/blobs/:hash` | Bajty dostępnego, publicznie opublikowanego materiału. |
 
-#### `POST /api/events`
+Parametr `:ref` może być uchwytem lub ID. W trasach `/head`, `/events` i wyszukiwaniu potwierdzenia zdarzenia `:id` oznacza **ID tożsamości**, nie jej uchwyt.
 
-Nagłówek `Content-Type: application/json`, ciało: koperta (taka sama jak plik JSON z CLI).
+### Zapis i sesja
+
+| Metoda | Ścieżka | Wymaganie | Opis |
+| --- | --- | --- | --- |
+| `POST` | `/api/events` | Podpisana koperta | Dopisanie zdarzenia, w tym utworzenie tożsamości. |
+| `POST` | `/api/session/challenge` | Brak sesji | Przygotowanie wyzwania do logowania kluczem autoryzacji. |
+| `POST` | `/api/session` | Podpis wyzwania | Utworzenie sesji i zwrócenie tokenu CSRF. |
+| `GET` | `/api/me` | Sesja | Dane bieżącej sesji. |
+| `DELETE` | `/api/session` | Sesja i CSRF | Zakończenie sesji. |
+| `POST` | `/api/blobs` | Sesja i CSRF | Przesłanie surowych bajtów pliku. |
+
+Wysyłając blob, klient podaje typ materiału w `Content-Type`. Dla żądań wymagających CSRF przesyła także nagłówek `x-csrf-token`. Samo wrzucenie bloba **nie tworzy publikacji**: potrzebne jest późniejsze `resource.put`.
+
+### Przykłady odczytu
+
+```sh
+# Publiczny profil
+curl http://localhost:4000/api/identities/PRZYKLADOWY_UCHWYT
+
+# Ostatnie zdarzenie (ID, nie uchwyt)
+curl http://localhost:4000/api/identities/ID_TOZSAMOSCI/head
+
+# Projekty
+curl http://localhost:4000/api/identities/PRZYKLADOWY_UCHWYT/projects
+```
+
+## Podpisane zdarzenia
+
+Zdarzenia są przesyłane do `POST /api/events` jako JSON. Przykładowy **kształt** koperty:
 
 ```json
 {
-  "payload":   "<ładunek zdarzenia w base64url>",
-  "signer":    "<id klucza podpisującego>",
-  "signature": "<podpis Ed25519 w base64url>"
+  "payload": "BASE64URL_PODPISANEGO_JSON",
+  "signer": "ID_KLUCZA_SYGNOWANIA",
+  "signature": "BASE64URL_PODPISU"
 }
 ```
 
-Ładunek (po zdekodowaniu) to JSON z polami 
-`v`, `signer`, `identity`, `seq`, `prev`, `type`, `body`, `ts`.
-Serwer **nie serializuje go ponownie**: weryfikuje podpis dokładnie na przesłanych bajtach.
+W wersji koperty **v2** mogą występować też `attachments`: tekstowe załączniki potrzebne do zapisu pól profilu lub metadanych. Nie są one częścią trwałego dziennika.
 
-Odpowiedź `201 Created`:
+Po zdekodowaniu `payload` zawiera między innymi: `v`, `signer`, `identity`, `seq`, `prev`, `type`, `body` i `ts`. Przykładowe typy operacji:
 
-```json
-{ "id": "<id zdarzenia>", "identity": "<id tożsamości>", "seq": 1, "type": "profile.update" }
-```
+| Typ | Działanie |
+| --- | --- |
+| `identity.genesis` | Utworzenie tożsamości. |
+| `profile.update`, `identity.visibility.set` | Zmiana profilu lub widoczności. |
+| `project.create`, `project.update`, `project.delete` | Utworzenie, zmiana i usunięcie projektu. |
+| `resource.put`, `resource.delete` | Dodanie, aktualizacja, przeniesienie lub usunięcie zasobu. |
+| `grant.create`, `grant.revoke` | Nadanie albo cofnięcie grantu. |
+| `key.add`, `key.revoke`, `auth_key.add`, `auth_key.revoke` | Operacje na kluczach. |
 
-Dla genesis `identity` jest równe `id`, a `seq` to 0.
+Kopertę można przygotować przez CLI. Nie da się stworzyć prawidłowego podpisu, podmieniając tekst w przykładowym JSON-ie.
 
-#### `GET /api/identities/:id/head`
-
-```json
-{ "identity": "<id>", "seq": 3, "id": "<id ostatniego zdarzenia>" }
-```
-
-Skąd piszący bierze `seq + 1` i `prev` następnego zdarzenia. 
-`404`, gdy tożsamość nie istnieje.
-
-#### `GET /api/identities/:id/events?after=N`
-
-```json
-{ "identity": "<id>", "head": 3, "events": [ { "payload": "...", "signer": "...", "signature": "..." } ] }
-```
-
-Koperty w kolejności `seq`, gotowe do niezależnej weryfikacji (`mix oktavarium.event.verify`) lub
-replikacji. `after` musi być liczbą całkowitą ≥ 0, inaczej `422 invalid_body` (`field: "after"`).
-
-### Strony (HTML)
-
-| Metoda | Ścieżka | Opis |
-| ------ | ------- | ---- |
-| `GET` | `/` | katalog tożsamości |
-| `GET` | `/i/:ref` | strona tożsamości; 
-    `ref` to uchwyt albo id (id tożsamości z uchwytem przekierowuje na adres z uchwytem). Parametr `?before=N` stronicuje dziennik. |
-
-Nieznana trasa lub tożsamość: `404` w HTML albo, przy `Accept: application/json`,
-`{"error": {"code": "not_found"}}`. Metoda `HEAD` działa dla tras `GET`.
-
-Do zrobienia: subdomeny tożsamości dla zasobów własnych frontendu (HTML/CSS/JS).
-
-### Przykład użycia
-
-```sh
-# głowa dziennika
-curl https://oktavarium.example.org/api/identities/ID/head
-
-# wysłanie koperty (to samo robi `mix oktavarium.submit`)
-curl -X POST https://oktavarium.example.org/api/events \
-  -H 'Content-Type: application/json' \
-  --data @events/pelagia-1.json
-```
-
-## Błędy
-
-Błąd ma stały kształt, a `code` pochodzi z walidacji po stronie serwera:
-
-```json
-{ "error": { "code": "bad_seq", "expected_seq": 4 } }
-```
-
-| Status | Kody (`code`) | Znaczenie |
-| ------ | ------------- | --------- |
-| 400 | `invalid_envelope` | koperta nieczytelna lub zły podpis (`reason`) |
-| 403 | `not_authorized` (z polem `field` dla profilu), 
-    `unknown_signer`, `not_signing_key`, `key_revoked`, 
-    `parent_not_delegable`, `grant_inactive`, `broken_chain`, `registration_closed` | 
-    podpisujący nie ma prawa albo rejestracja jest zamknięta |
-| 404 | `unknown_identity`, `not_found` | nie ma takiej tożsamości lub trasy |
-| 409 | `duplicate_event`, `bad_seq` (z `expected_seq`), 
-    `bad_prev`, `handle_taken`, `signing_key_already_registered`, `conflict` | 
-    konflikt ze stanem dziennika; po `bad_seq` pobierz głowę i podpisz zdarzenie ponownie |
-| 422 | `invalid_body` (z `field`), `not_covered`, `window_exceeds_parent`, 
-    `invalid_window`, `unknown_subject_key`, `subject_not_signing_key`, `unsupported_type` i inne | 
-    zdarzenie poprawnie podpisane, ale odrzucone przez reguły |
+Przyjęty zapis zwraca `201 Created` i dane zdarzenia, np. jego `id`, `identity`, `seq` i `type`. Następne zdarzenie musi wskazać właściwą głowę dziennika przez `seq` i `prev`.
 
 ## Autoryzacja
 
-**Nie ma haseł, tokenów ani sesji w API**.
-Autoryzacja jest wbudowana w samo zdarzenie:
+**Odczyt** katalogu, profilu, projektów i historii nie wymaga sesji. Dotyczy to również `unlisted`, jeśli zna się adres.
 
-1. **Uwierzytelnienie = podpis.**
-    Każde zapisujące żądanie niesie kopertę podpisaną kluczem Ed25519.
-    Serwer sprawdza podpis (domena `oktavarium/event/v1`), więc wie, **który klucz** to wysłał,
-    i nie da się go podrobić ani przekierować w inny kontekst.
-2. **Autoryzacja = granty.**
-    Klucz założycielski może wszystko w swojej tożsamości;
-    każdy inny klucz musi mieć ważny łańcuch grantów do klucza założycielskiego, 
-    obejmujący daną akcję i zasób w bieżącym czasie serwera (zob. [05-architecture.md](05-architecture.md)).
-3. **Odczyt jest publiczny.**
-    `GET` nie wymaga uwierzytelnienia: dzienniki są jawne i mają być weryfikowalne przez każdego.
-4. **Rejestracja nowych tożsamości** jest bramkowana ustawieniem
-    `config :oktavarium, registration:` (`:open` w dev/test, `:closed` na produkcji; 
-    nadpisanie zmienną środowiskową `OKTAVARIUM_REGISTRATION`). 
-    Przy `:closed` genesis przez HTTP kończy się `403 registration_closed`, 
-    a operator wczytuje go poleceniem `mix oktavarium.`
+**Podpisywanie zmian** jest niezależne od cookie: serwer sprawdza podpis Ed25519 i uprawnienia klucza. 
+Założyciel ma pełny dostęp w swojej tożsamości; współpracownik działa w granicach grantów.
 
-## Ograniczenia wybranego rozwiązania
+**Upload plików** wymaga sesji uzyskanej po podpisaniu wyzwania kluczem autoryzacji. 
+Sesja nie zastępuje podpisu `resource.put`.
 
-| Obszar | Ograniczenie | Skutek / plan |
-| ------ | ------------ | ------------- |
-| Limity zapytań | **brak** ograniczania liczby żądań | do czasu dodania (planowane) instancję należy chronić na poziomie serwera pośredniczącego; rejestracja jest na produkcji zamknięta |
-| Rozmiar żądania | parser JSON przyjmuje do 64 KiB | wystarcza dla koperty (kilkaset bajtów) |
-| Paginacja | `GET .../events` zwraca **wszystkie** zdarzenia po `after`, bez limitu | klient pobiera przyrostowo (`after=<ostatni seq>`); limit strony do dodania |
-| Współbieżność zapisu | SQLite serializuje zapisy (`BEGIN IMMEDIATE`) | zapisy kolejkują się; dwóch piszących do jednego dziennika zderza się na `seq` i przegrany dostaje `409 bad_seq` - musi pobrać głowę i podpisać ponownie (ponawianie w CLI planowane) |
-| Trwałość danych | dane w jednym pliku SQLite na dysku serwera | kopie zapasowe to obowiązek operatora; 
-    dziennik jest źródłem prawdy, więc po uszkodzeniu projekcji wystarczy `mix oktavarium.rebuild --apply`, 
-    ale utraty samego pliku to nie naprawia |
-| Dostępność | jeden węzeł, brak replikacji i failoveru | awaria serwera = niedostępność; 
-    brak SLA. Federacja (replikacja dzienników) jest poza zakresem MVP |
-| Skalowanie | rozwiązanie dla małej, zamkniętej społeczności | przejście na Postgresa opisane wyżej |
-| Wersjonowanie API | trasy bez numeru wersji; ładunek ma pole `v: 1` | zmiany niezgodne wstecz wymagają nowej wersji ładunku |
-| Widoczność | pole `visibility: restricted` ukrywa tożsamość na stronach, ale **nie** w API | dane w API są publiczne; nie przechowuj w dzienniku niczego poufnego |
-| Niezmienność | zdarzenia są jawne i nieusuwalne | nie wpisuj w profil danych, których nie chcesz publikować na zawsze |
-| Zegar | ważność grantów liczona według zegara serwera | błędny zegar serwera = błędna ważność grantów |
-| Przepływ lokalny | `mix oktavarium.ingest` i `mix oktavarium.rebuild` działają na bazie bezpośrednio | wymagają dostępu do maszyny z bazą; `rebuild` blokuje zapisy na czas transakcji |
+Przy zamkniętej rejestracji utworzenie tożsamości przez HTTP wymaga ważnego zaproszenia w nagłówku `x-oktavarium-invite`.
+Operator może też wczytać podpisane zdarzenie lokalnie.
 
-Przy wdrożeniu produkcyjnym wymagane zmienne: `DATABASE_PATH` (ścieżka pliku SQLite),
-`SECRET_KEY_BASE`; opcjonalne: `PHX_HOST`, `PORT`, `POOL_SIZE`, `OKTAVARIUM_REGISTRATION`.
+## Błędy
+
+API zwraca kod HTTP i czytelny kod błędu:
+
+```json
+{
+  "error": {
+    "code": "bad_seq",
+    "expected_seq": 4
+  }
+}
+```
+
+Najczęstsze sytuacje:
+
+| HTTP | Przykładowy kod | Znaczenie |
+| --- | --- | --- |
+| `400` | `invalid_envelope` | Niepoprawna koperta albo podpis. |
+| `401` | `unauthenticated` | Brak potrzebnej sesji. |
+| `403` | `not_authorized`, `registration_closed` | Brak prawa do operacji lub zamknięta rejestracja. |
+| `404` | `unknown_identity`, `unknown_project`, `event_not_found` | Nie znaleziono wskazanego obiektu. |
+| `409` | `bad_seq`, `bad_prev`, `project_slug_taken`, `resource_path_taken` | Konflikt z aktualnym stanem. |
+| `413` / `415` | `too_large`, `unsupported_media_type` | Za duży plik lub niewspierany format. |
+| `422` | `invalid_body`, `invalid_window` | Nieprawidłowe dane operacji. |
+
+`event_not_found` oznacza, że zdarzenie nie zostało znalezione w chwili odczytu. Po utraconej odpowiedzi nie jest to jeszcze pewny dowód, że wcześniejszy zapis nie dotrze.
+
+## Ograniczenia
+
+- Instancja jest przewidziana dla małej społeczności. Nie ma federacji ani automatycznej replikacji.
+- Własne strony HTML/CSS/JS działają tylko przy skonfigurowanej domenie stron (`OKTAVARIUM_SITES_DOMAIN`).
+- API nie zapewnia prywatności profili ani dzienników. `unlisted` to brak wyświetlania w katalogu, nie kontrola odczytu.
+- Nie ma pełnego systemu automatycznego ograniczania liczby żądań; publiczny serwer wymaga dodatkowej ochrony operatora.
+- Zapis danych do bazy i blobów jest serializowany, przez co współbieżność zapisów jest ograniczona do niezależnych dzienników.
+
+Przy wdrożeniu produkcyjnym wymagane zmienne: 
+`DATABASE_PATH` (ścieżka pliku SQLite),
+`SECRET_KEY_BASE`; 
+opcjonalne: 
+`PHX_HOST`, `PORT`, `POOL_SIZE`, 
+`OKTAVARIUM_REGISTRATION`, 
+`OKTAVARIUM_BLOB_DIR`, 
+`OKTAVARIUM_SITES_DOMAIN`.
