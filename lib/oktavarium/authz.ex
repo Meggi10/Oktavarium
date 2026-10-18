@@ -79,8 +79,10 @@ defmodule Oktavarium.Authz do
       true ->
         with {:ok, parent} <- fetch(index, grant.parent_grant_id, {:broken_chain, grant.id}),
              :ok <- check(parent.subject_key_id == grant.issuer_key_id, {:broken_chain, grant.id}),
-             :ok <- check(parent.delegable == true, {:broken_chain, grant.id}) do
-          chain_valid(parent, index, founding, now, MapSet.put(seen, grant.id))
+             :ok <- check(parent.delegable == true, {:broken_chain, grant.id}),
+             :ok <- chain_valid(parent, index, founding, now, MapSet.put(seen, grant.id)),
+             :ok <- check(Delegation.delegate(parent, grant) == :ok, {:broken_chain, grant.id}) do
+          :ok
         end
     end
   end

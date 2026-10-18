@@ -1,6 +1,6 @@
 defmodule Oktavarium.Cli do
   @moduledoc false
-  alias Oktavarium.{Capability, Crypto, Envelope}
+  alias Oktavarium.{Capability, Crypto, Envelope, Projects, Resources}
   alias Oktavarium.Cli.{Files, Keyfile}
   alias Oktavarium.Identities.{Profile, Rules}
 
@@ -134,7 +134,7 @@ defmodule Oktavarium.Cli do
          {:ok, to} <- require_key_id(opts[:to], :to),
          {:ok, action} <- require_opt(opts[:action], :action),
          :ok <- check(Capability.valid_action?(action), {:invalid_action, action}),
-         resource = opts[:resource] || prev.identity <> "/*",
+         {:ok, resource} <- grant_resource(prev.identity, opts),
          :ok <- check(Capability.valid_resource?(resource), {:invalid_resource, resource}),
          :ok <-
            check(
@@ -163,6 +163,92 @@ defmodule Oktavarium.Cli do
       |> finish()
     end
   end
+
+  defp grant_resource(identity, opts) do
+    case opts[:project] do
+      nil -> {:ok, opts[:resource] || identity <> "/*"}
+      project -> Projects.grant_resource(identity, project, opts[:resource] || "*")
+    end
+  end
+
+  @doc "Prepare and sign a project operation without writing to the database."
+  def project_event(key_path, operation, opts) when operation in ["create", "update", "delete"] do
+    body =
+      %{}
+      |> put_unless_nil("id", opts[:id])
+      |> put_unless_nil("slug", opts[:slug])
+
+    meta =
+      %{}
+      |> put_unless_nil("title", opts[:title])
+      |> put_unless_nil("description", opts[:description])
+
+    body =
+      if operation == "create" or map_size(meta) > 0, do: Map.put(body, "meta", meta), else: body
+
+    sign_operation(key_path, "project." <> operation, body, opts[:after])
+  end
+
+  def project_event(_key_path, operation, _opts),
+    do: {:error, {:invalid_option, :operation, operation}}
+
+  @doc "Prepare resource.put/delete. --root explicitly clears project_id; omission preserves it."
+  def resource_event(key_path, operation, opts) when operation in ["put", "delete"] do
+    with :ok <-
+           check(
+             not (opts[:root] == true and not is_nil(opts[:project])),
+             {:invalid_body, "project_id"}
+           ) do
+      body =
+        %{}
+        |> put_unless_nil("id", opts[:id])
+        |> put_unless_nil("path", opts[:path])
+        |> put_unless_nil("project_id", opts[:project])
+        |> put_unless_nil("hash", opts[:hash])
+        |> put_unless_nil("size", opts[:size])
+        |> put_unless_nil("media_type", opts[:media_type])
+
+      body = if opts[:root] == true, do: Map.put(body, "project_id", nil), else: body
+
+      meta =
+        Enum.reduce([:title, :alt, :description, :collection], %{}, fn field, acc ->
+          put_unless_nil(acc, Atom.to_string(field), opts[field])
+        end)
+
+      body = if map_size(meta) > 0, do: Map.put(body, "meta", meta), else: body
+      sign_operation(key_path, "resource." <> operation, body, opts[:after])
+    end
+  end
+
+  def resource_event(_key_path, operation, _opts),
+    do: {:error, {:invalid_option, :operation, operation}}
+
+  def revoke_grant(key_path, opts) do
+    with {:ok, id} <- require_opt(opts[:grant], :grant),
+         :ok <- check(Resources.valid_id?(id), {:invalid_body, "grant"}) do
+      sign_operation(key_path, "grant.revoke", %{"grant" => id}, opts[:after])
+    end
+  end
+
+  defp sign_operation(key_path, type, body, after_path) do
+    with {:ok, key} <- load_signing_key(key_path),
+         {:ok, after_path} <- require_opt(after_path, :after),
+         {:ok, prev} <- read_event(after_path),
+         {:ok, _} <- validate_operation(type, body) do
+      Envelope.sign(
+        %{type: type, seq: prev.seq + 1, identity: prev.identity, prev: prev.id, body: body},
+        Keyfile.keypair(key)
+      )
+      |> finish()
+    end
+  end
+
+  defp validate_operation("project.create", body), do: Projects.parse_create(body)
+  defp validate_operation("project.update", body), do: Projects.parse_update(body)
+  defp validate_operation("project.delete", body), do: Projects.parse_delete(body)
+  defp validate_operation("resource.put", body), do: Resources.parse_put(body)
+  defp validate_operation("resource.delete", body), do: Resources.parse_delete(body)
+  defp validate_operation("grant.revoke", body), do: {:ok, body}
 
   @doc """
   Podpisuje zdarzenie `profile.update`: ustawia albo usuwa pola profilu tożsamości.

@@ -19,7 +19,7 @@ defmodule Oktavarium.Resources do
   def resource(identity_id, path, nil), do: identity_id <> "/" <> path
 
   def resource(identity_id, path, project_id) when is_binary(project_id),
-    do: identity_id <> "/projects/" <> project_id <> "/" <> path
+    do: Oktavarium.Projects.resource(identity_id, project_id) <> "/" <> path
 
   @doc "Dozwolone typy mediów dla rodzaju."
   @spec media_types(kind()) :: [String.t()]

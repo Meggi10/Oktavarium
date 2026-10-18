@@ -11,9 +11,26 @@ defmodule Oktavarium.Directory do
 
   @type grant_status :: :active | :revoked | :expired | :pending | :broken
 
+  # The avatar is a normal signed resource in the identity's root namespace.
+  # Updating it by resource.put keeps its stable ID and does not change the
+  # profile event schema. Project files with the same path are not avatars.
+  @avatar_path "images/avatar"
+  def avatar_path, do: @avatar_path
+
+  def avatar(resources) when is_list(resources) do
+    Enum.find(resources, fn r ->
+      r.kind == :image and is_nil(r.project_id) and r.path == @avatar_path
+    end)
+  end
+
   @doc "Publiczne tożsamości, najnowsze pierwsze, z liczbą zdarzeń i głową dziennika."
   @spec list_identities() :: [
-          %{identity: %Identity{}, events: non_neg_integer(), head: String.t() | nil}
+          %{
+            identity: %Identity{},
+            events: non_neg_integer(),
+            head: String.t() | nil,
+            avatar_hash: String.t() | nil
+          }
         ]
   def list_identities do
     identities =
@@ -50,8 +67,23 @@ defmodule Oktavarium.Directory do
       |> Repo.all()
       |> Map.new()
 
+    avatar_hashes =
+      Repo.all(
+        from r in Resource,
+          where:
+            r.identity_id in ^ids and r.kind == ^:image and is_nil(r.project_id) and
+              r.path == ^@avatar_path,
+          select: {r.identity_id, r.hash}
+      )
+      |> Map.new()
+
     Enum.map(identities, fn i ->
-      %{identity: i, events: Map.get(counts, i.id, 0), head: Map.get(heads, i.id)}
+      %{
+        identity: i,
+        events: Map.get(counts, i.id, 0),
+        head: Map.get(heads, i.id),
+        avatar_hash: Map.get(avatar_hashes, i.id)
+      }
     end)
   end
 
@@ -61,6 +93,19 @@ defmodule Oktavarium.Directory do
     Repo.one(
       from i in Identity,
         where: i.handle == ^ref or i.id == ^ref
+    )
+  end
+
+  # Public project index: unlisted owners remain readable by address, not discoverable.
+  def list_projects(opts \\ []) do
+    Repo.all(
+      from p in Resource,
+        join: i in Identity,
+        on: i.id == p.identity_id,
+        where: p.kind == ^:project and i.visibility == ^:public,
+        order_by: [desc: p.updated_at, asc: p.id],
+        limit: ^Keyword.get(opts, :limit, 48),
+        select: %{project: map(p, [:id, :path, :meta, :meta_refs, :updated_at]), identity: i}
     )
   end
 
@@ -139,7 +184,9 @@ defmodule Oktavarium.Directory do
       from r in Resource,
         join: i in Identity,
         on: i.id == r.identity_id,
-        where: r.kind == ^kind and i.visibility == ^:public,
+        where:
+          r.kind == ^kind and i.visibility == ^:public and
+            not (is_nil(r.project_id) and r.path == ^@avatar_path),
         order_by: [desc: r.updated_at, desc: r.inserted_at, asc: r.path],
         limit: ^Keyword.get(opts, :limit, 48),
         select: %{
@@ -213,6 +260,42 @@ defmodule Oktavarium.Directory do
 
   @doc "Czy tożsamość o `id` istnieje (także niepubliczna); do API zalogowanych."
   def identity_exists?(id), do: Repo.exists?(from i in Identity, where: i.id == ^id)
+
+  @doc "A project in its owner's namespace, including unlisted identities."
+  def project(%Identity{id: identity_id}, project_id) do
+    Repo.get_by(Resource, id: project_id, identity_id: identity_id, kind: :project)
+  end
+
+  @doc "Published file by ID. Never returns a project or another owner's file."
+  def file(%Identity{id: identity_id}, resource_id) do
+    Repo.one(
+      from r in Resource,
+        where: r.id == ^resource_id and r.identity_id == ^identity_id and r.kind != ^:project
+    )
+  end
+
+  @doc "A website file in a project's isolated origin."
+  def project_site_file(project_id, relative) do
+    row =
+      Repo.one(
+        from r in Resource,
+          join: p in Resource,
+          on: p.id == r.project_id and p.identity_id == r.identity_id,
+          where:
+            p.id == ^project_id and p.kind == ^:project and
+              r.kind == ^:site and r.path == ^("site/" <> relative),
+          select: %{hash: r.hash, media_type: r.media_type, size: r.size}
+      )
+
+    if row, do: {:ok, row}, else: :error
+  end
+
+  def project_has_site?(project_id) do
+    Repo.exists?(
+      from r in Resource,
+        where: r.project_id == ^project_id and r.kind == ^:site and r.path == "site/index.html"
+    )
+  end
 
   @doc "Id klucza założycielskiego (podpisał genesis)."
   @spec founding_key_id(%Identity{}) :: String.t() | nil

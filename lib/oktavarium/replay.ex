@@ -132,8 +132,19 @@ defmodule Oktavarium.Replay do
 
   # Kolejność FK: granty (samoodwołanie), powiązania, zdarzenia, klucze, tożsamości.
   defp wipe do
-    for schema <- [Resource, IdentitySigningKey, Grant, IdentityAuthKey, Event, Key, Identity],
-        do: Repo.delete_all(schema)
+    Repo.update_all(Grant, set: [parent_grant_id: nil])
+
+    for schema <- [
+          Resource,
+          IdentitySigningKey,
+          Grant,
+          IdentityAuthKey,
+          Event,
+          Key,
+          Identity
+        ] do
+      Repo.delete_all(schema)
+    end
 
     :ok
   end

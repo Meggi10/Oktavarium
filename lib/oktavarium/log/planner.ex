@@ -416,7 +416,7 @@ defmodule Oktavarium.Log.Planner do
            authorize_old_path(
              event,
              facts,
-             Resources.put_action(),
+             Resources.delete_action(),
              facts.resource,
              put.path,
              attrs.project_id
@@ -465,7 +465,7 @@ defmodule Oktavarium.Log.Planner do
              event,
              facts,
              "project.create",
-             Resources.resource(event.identity, project.path)
+             Projects.collection(event.identity)
            ) do
       attrs = %{
         id: event.id,
@@ -506,10 +506,8 @@ defmodule Oktavarium.Log.Planner do
              event,
              facts,
              "project.update",
-             Resources.resource(event.identity, facts.project.path)
-           ),
-         :ok <-
-           authorize(event, facts, "project.update", Resources.resource(event.identity, path)) do
+             Projects.resource(event.identity, facts.project.id)
+           ) do
       attrs = %{
         id: facts.project.id,
         identity_id: event.identity,
@@ -533,7 +531,7 @@ defmodule Oktavarium.Log.Planner do
              event,
              facts,
              "project.delete",
-             Resources.resource(event.identity, facts.project.path)
+             Projects.resource(event.identity, facts.project.id)
            ) do
       {:ok, [event_op(envelope, event), {:resource_delete, %{id: facts.project.id}}]}
     end
@@ -638,9 +636,18 @@ defmodule Oktavarium.Log.Planner do
 
   # Grant cofa jego wystawca, klucz założycielski albo ktoś z capability `grant.revoke`.
   defp authorize_revoke(event, facts, grant) do
-    if event.signer in [facts.founding_key_id, grant.issuer_key_id],
-      do: :ok,
-      else: authorize(event, facts, "grant.revoke", event.identity <> "/grants/" <> grant.id)
+    cond do
+      event.signer in [facts.founding_key_id, grant.issuer_key_id] ->
+        :ok
+
+      authorize(event, facts, "grant.revoke", grant.resource) == :ok ->
+        # A project manager may revoke grants wholly inside that project,
+        # but not a broader identity-wide grant or a sibling project's grant.
+        :ok
+
+      true ->
+        authorize(event, facts, "grant.revoke", event.identity <> "/grants/" <> grant.id)
+    end
   end
 
   defp authorize(event, facts, action, resource) do

@@ -8,8 +8,27 @@ defmodule Oktavarium.Projects do
 
   @slug ~r/\A[a-z0-9][a-z0-9-]{0,59}\z/
 
-  @doc "Kanoniczna ścieżka projektu (używana w katalogu i grantach)."
+  @doc "Ścieżka projektu w katalogu; uprawnienia używają stabilnego ID."
   def path(slug), do: "projects/" <> slug
+
+  @doc "Stable authorization namespace, independent of the display slug."
+  def resource(identity_id, project_id), do: identity_id <> "/projects/" <> project_id
+
+  @doc "The collection on which project.create is authorized."
+  def collection(identity_id), do: identity_id <> "/projects"
+
+  @doc "A grant suffix inside a project (wildcard or relative resource path)."
+  def grant_resource(identity_id, project_id, suffix \\ "*") do
+    if Resources.valid_id?(project_id) and is_binary(suffix) do
+      full = resource(identity_id, project_id) <> "/" <> String.trim_leading(suffix, "/")
+
+      if Oktavarium.Capability.valid_resource?(full),
+        do: {:ok, full},
+        else: {:error, {:invalid_resource, full}}
+    else
+      {:error, {:invalid_body, "project_id"}}
+    end
+  end
 
   @doc "Walidacja `project.create`: slug oraz meta z wymaganym title."
   def parse_create(body) when is_map(body) do

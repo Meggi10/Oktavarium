@@ -1,9 +1,26 @@
 # Oktavarium
-Pseudo-anonimowa, samohostowalna platforma (z dostępem na zaproszenie) dla artystów, "nerdów" i ogółem społeczności,
-oparta na **kryptograficznych tożsamościach** i **delegowanych uprawnieniach**.
-Tożsamością jest klucz, uprawnienia to podpisane granty ("klucz A pozwala kluczowi B na X w Y do czasu Z"),
-a każda tożsamość prowadzi własny, weryfikowalny dziennik podpisanych zdarzeń, podobny do historii commitów.
-Tabele z bazie i strony WWW są jego widokiem, można je odbudować z dziennika.
+
+**Oktavarium** to prototyp platformy dla osób twórczych i małych kolektywów.
+Można tu prowadzić swój publiczny profil, pokazywać obrazy czy nagrania, tworzyć projekty oraz wspólnie publikować pliki.
+
+Zamiast zwykłych kont opartych na haśle, aplikacja używa **kluczy kryptograficznych**.
+Każda zmiana jest podpisywana i trafia do dziennika tożsamości.
+Dzięki temu można sprawdzić historię zmian i określić, który klucz ma prawo zmienić stan danych.
+**Oglądanie opublikowanych materiałów nie wymaga żadnej autoryzacji.**
+
+## Co potrafi obecna wersja
+
+- **Osoby i kolektywy:** tożsamości `person` i `collective`, z nazwą wyświetlaną, uchwytem `@handle`, opisem i zdjęciem profilowym.
+- **Odkrywaj:** publiczny katalog osób, kolektywów, projektów, obrazów i nagrań.
+- **Projekty:** osobne przestrzenie na pliki; projekt należy do tożsamości i zachowuje swoje ID po zmianie nazwy.
+- **Pracownia:** edycja profilu, projekty, zasoby, uprawnienia, klucze i historia zmian.
+- **Współpraca:** przyznawanie, delegowanie i cofanie uprawnień do określonych działań, projektów lub ścieżek.
+- **Własne strony:** możliwość opublikowania plików HTML/CSS/JS, serwowanych pod osobnym hostem, jeśli instancja ma skonfigurowaną domenę stron.
+- **Dzienniki:** podpisane zdarzenia oraz narzędzia do sprawdzenia i odbudowy aktualnego stanu bazy.
+
+Tożsamość `unlisted` nie pojawia się w publicznym katalogu, 
+ale nadal **można ją odczytać po bezpośrednim adresie**. 
+Nie jest to tryb prywatny.
 
 ## Dokumentacja
 | Plik | Zawartość |
@@ -42,6 +59,7 @@ W środowisku rejestracja jest owarta, więc można to zrobić od razu
 (klucze prywatne trafiają lokalnie do katalogu `keys/`, który jest w `.gitignore`):
 
 ```sh
+mkdir -p keys events
 mix oktavarium.key.gen --out keys/ja.key                    # klucz sygnowania
 mix oktavarium.key.gen --kind auth --out keys/laptop.key    # klucz autoryzacji
 mix oktavarium.key.show keys/laptop.key                     # wypisuje id klucza (nigdy prywatny)
@@ -59,11 +77,37 @@ Tożsamość jest wtedy widoczna pod `http://localhost:4000/` i `http://localhos
 Pozostałe polecenia (`oktavarium.grant`, `oktavarium.event.verify`) opisuje `mix help oktavarium.<nazwa>`,
 a przebiegi od początku do końca [docs/02-requirements.md](docs/02-requirements.md).
 
+### Najważniejsze adresy
+
+| Adres | Co zawiera |
+| --- | --- |
+| `/` | Odkrywaj: publikacje i katalog społeczności. |
+| `/?view=images`, `?view=audio`, `?view=projects`, `?view=people` | Filtry strony głównej. |
+| `/i/:ref` | Publiczny profil osoby lub kolektywu. |
+| `/i/:ref/projects/:project_id` | Publiczna strona projektu. |
+| `/join` | Utworzenie tożsamości. |
+| `/login` | Odblokowanie lub przywrócenie lokalnego skarbca. |
+| `/studio` | Pracownia. |
+
 ### Testy
 
 ```sh
-mix test            # przygotowuje bazę testową i uruchamia wszystkie testy
+mix test                        # przygotowuje bazę testową i uruchamia wszystkie testy Elixira
+node --test test/js/*_test.mjs  # wbudowany mechanism testowy Node.js
 ```
+
+W `test/e2e` są też scenariusze testowe end-to-end dla przeglądarki.
+Wymagają **uruchomionego serwera deweloperskiego**,
+pakietu Python `playwright` i przeglądarki Chromium:
+
+```sh
+python3 test/e2e/browser_flow.py http://localhost:4000 /tmp/oktavarium-c2
+python3 test/e2e/projects_flow.py http://localhost:4000 /tmp/oktavarium-projects-c2
+```
+
+**Uwaga:** 
+testy E2E zakładają tożsamości i tworzą materiały na wskazanym serwerze. 
+Nie uruchamiaj ich na ważnej bazie ani na produkcji.
 
 ### Polecenia operatora (praca bezpośrednio na bazie)
 
@@ -73,26 +117,43 @@ mix oktavarium.rebuild                  # sprawdza czy baza zgadza się z dzienn
 mix oktavarium.rebuild --apply          # odbudowuje projekcję z dzienników, jeśli się rozjechała
 ```
 
+### Pierwsze kroki w przeglądarce
+
+1. Wejdź na **`/join`** i utwórz tożsamość osoby lub kolektywu. Podaj uchwyt i osobną nazwę wyświetlaną.
+2. Przygotuj klucze, pobierz **kopię skarbca** i zabezpiecz ją wraz z hasłem. Bez kluczy nie będzie można podpisywać zmian.
+3. Otwórz **Pracownię** (`/studio`), wybierz tożsamość i odblokuj odpowiedni klucz.
+4. Uzupełnij profil, utwórz projekt i opublikuj materiał. Przed zapisem zobaczysz podsumowanie operacji do podpisania.
+5. Sprawdź rezultat na stronie głównej lub pod adresem profilu **`/i/TWOJ_UCHWYT`**.
+
+Odblokowanie skarbca jest lokalne i **nie oznacza zalogowania na serwer**. Sesja serwerowa jest potrzebna osobno przy wysyłaniu bajtów plików. Samo przesłanie pliku nie jest jeszcze publikacją: potrzebne jest podpisane zdarzenie.
+
 ### Uruchomienie produkcyjne
 Na produkcji (`MIX_ENV=prod`) wymagane są zmienne środowiskowe:
 
 | Zmienna | Znaczenie |
 | ------- | --------- |
-| `DATABASE_PATH` | ścieżka pliku SQLite, np. `/var/lib/oktavarium/oktavarium.db` (wymagana) |
-| `SECRET_KEY_BASE` | sekret serwera, wygeneruj `mix phx.gen.secret` (wymagana) |
+| `DATABASE_PATH` | ścieżka pliku SQLite, np. `/var/lib/oktavarium/oktavarium.db` (**wymagana**) |
+| `SECRET_KEY_BASE` | sekret serwera, wygeneruj `mix phx.gen.secret` (**wymagana**) |
 | `PHX_HOST` | nazwa hosta (domyślnie `localhost`) |
 | `PORT` | port HTTP (domyślnie `4000`) |
 | `POOL_SIZE` | liczba połączeń z bazą (domyślnie `5`) |
 | `OKTAVARIUM_REGISTRATION` | `open` albo `closed` (na produkcji domyślnie `closed`) |
+| `OKTAVARIUM_BLOB_DIR` | Katalog magazynu plików; domyślnie `blobs` obok bazy. |
+| `OKTAVARIUM_SITES_DOMAIN` | Osobna domena dla stron HTML/CSS/JS twórców; bez niej strony te są wyłączone. |
 
 ```sh
-export MIX_ENV=prod DATABASE_PATH=/var/lib/oktavarium/priv/oktavarium.db SECRET_KEY_BASE=...
+export MIX_ENV=prod
+export DATABASE_PATH=/var/lib/oktavarium/oktavarium.db
+export SECRET_KEY_BASE='TU_WSTAW_WYGENEROWANY_SEKRET'
+export PHX_HOST=example.org
+
 mix deps.get --only prod
-mix ecto.create && mix ecto.migrate
+mix ecto.create
+mix ecto.migrate
 mix phx.server
 ```
 
-Przy `closed` nowe tożsamości przez HTTP są odrzucane;
-pierwsze zdarzenia założycielskie wczytuje operator poleceniem `mix oktavarium.ingest`.
-Serwer nie obsługuje TLS: należy go umieścić za serwerem pośredniczącym (reverse proxy) z HHTPS.
-Gotowych wydań (release) i procedury kopii zapasowych nie ma.
+Na produkcji rejestracja nowych tożsamości przez HTTP jest domyślnie zamknięta. 
+Operator może wprowadzać przygotowane, podpisane zdarzenia za pomocą 
+`mix oktavarium.ingest` albo świadomie włączyć rejestrację. 
+Własne strony powinny korzystać z oddzielnego hosta i odpowiednio skonfigurowanego DNS.
