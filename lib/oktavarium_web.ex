@@ -10,6 +10,7 @@ defmodule OktavariumWeb do
   def router do
     quote do
       use Phoenix.Router, helpers: false
+      import Phoenix.LiveView.Router
       import Plug.Conn
       import Phoenix.Controller
     end
@@ -27,6 +28,13 @@ defmodule OktavariumWeb do
     quote do
       use Phoenix.Component
       import Phoenix.Controller, only: [get_csrf_token: 0, view_module: 1, view_template: 1]
+      unquote(html_helpers())
+    end
+  end
+
+  def live_view do
+    quote do
+      use Phoenix.LiveView, layout: {OktavariumWeb.Layouts, :app}
       unquote(html_helpers())
     end
   end

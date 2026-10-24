@@ -46,8 +46,8 @@ a odbudowa projekcji (`Replay`) używa tego samego plannera co zwykłe przyjęci
 | ------- | ------ | ---- |
 | Elixir / Erlang OTP | wymagane `~> 1.17` (mix.exs); rozwijane i testowane na Elixir 1.18.4, OTP 27 | język i platforma uruchomieniowa |
 | Phoenix | `~> 1.8` (testowano 1.8.15) | framework webowy: endpoint, router, kontrolery |
-| Phoenix HTML, Phoenix LiveView | `~> 4.2` (4.3.0), `~> 1.1` (1.2.12) | szablony HEEx i komponenty funkcyjne; **gniazda LiveView nie są narazie używane** |
-| Bandit | `~> 1.8` (1.12.5) | serwer HTTP |
+| Phoenix HTML, Phoenix LiveView | `~> 4.2` (4.3.0), `~> 1.1` (1.2.12) | gniazda LiveView, szablony HEEx i komponenty funkcyjne; |
+| Bandit | `~> 1.13.1` (1.13.1) | serwer HTTP |
 | Ecto SQL + Ecto SQLite3 | `~> 3.14` (3.14.2 / 3.14.0), `~> 0.25` (0.25.0) | dostęp do bazy, migracje, schematy |
 | Exqlite | 0.42.0 (zależność Ecto SQLite3) | sterownik SQLite |
 | Jason | `~> 1.4` (1.4.5) | JSON |
@@ -82,10 +82,77 @@ Wersje w nawiasach to wersje, na których uruchomiono pełny zestaw testów.
 Świadomie **nie** używamy: Tailwind/esbuild i innych narzędzi budowania zasobów 
 (jeden ręcznie napisany plik CSS), ORM poza Ecto, systemu kolejek, pamięci podręcznej.
 
+### Odpowiedniki obowiązkowego rdzenia frameworka frontendowego
+
+Tabela odnosi się do wszystkich siedmiu obszarów "Obowiązkowego rdzenia rozwiązania" z zasad projektu (s. 18), 
+z uwzględnieniem minimum REST (s. 19) i zasad bibliotek/UI (s. 20). 
+Nazwy mechanizmów Angulara i Reacta są przykładami, 
+nie wymogiem użycia tych samych interfejsów programistycznych.
+
+| Obszar | Typowy Angular / React | Implementacja i zakres w projekcie |
+| ------ | ---------------------- | ---------------------------------- |
+| Framework + TS | Aktualny Angular/React/Vue z TypeScriptem | 
+    Phoenix 1.8 i LiveView 1.2. `assets/catalog.ts` typuje hook, a `assets/js/**/*.ts` 
+    zawiera wszystkie własne źródła skryptów przeglądarki. 
+    `tsc` sprawdza oba obszary.
+    Zewnętrzna implementacja Ed25519 i wygenerowane pliki dla przeglądarki pozostają JS. 
+    `tsc` przechodzi z pełnym `strict`, a `models.ts` oraz `studio-state.ts` typują projekcje i stan. 
+    Dynamiczny adapter DOM w `ui.ts` i podpisywane treści zdarzeń nadal używają jawnych granic elastycznego JSON. |
+| Architektura | Features, standalone/smart/dumb components, shared/core, pojedyncza odpowiedzialność | 
+    `DiscoverLive` pobiera dane i zarządza stanem (smart), 
+    `PageHTML.home` i `PublicComponents.project_card/file_card` prezentują wejściowe dane (dumb), 
+    `Layouts` scala powłokę; funkcje HEEx mają `attr`/`slot`, `~H`, `:if`, `:for`. 
+    Sekcje Studio są w `studio-{projects,resources,grants,profile,keys,read}.ts` z typowanymi zależnościami; 
+    `studio.ts` nadal łączy nawigację, odczyt i zapis. |
+| Routing | Angular/React Router, parametry, wejście bezpośrednie | 
+    `Router` mapuje ścieżki, `DiscoverLive.handle_params/3` reaguje na `?view=` i 
+    linki `patch`; `/i/:ref` i `/i/:ref/projects/:project_id` działają bezpośrednio; 
+    Studio synchronizuje sekcję przez History API. |
+| Formularze | Angular Forms / kontrolowane formularze, walidatory i błędy | 
+    `/join` i Pracownia budują formularze w modułach UI, sprawdzają wymagane pola i formaty, 
+    pokazują lokalne oraz serwerowe błędy. Backend waliduje ostatecznie podpisane zdarzenie; 
+    ukrycie przycisku nie nadaje uprawnień. |
+| API (REST) | HttpClient/fetch i serwis dostępu do danych, typowane DTO gdy potrzebne | 
+    `assets/js/lib/api.ts` izoluje `fetch`, timeouty, statusy i błędy; 
+    `GET` czyta tożsamości/projekty, a `POST /api/events` zapisuje podpisane operacje tworzenia, zmiany i usunięcia. 
+    Projekcja jest odświeżana po zapisie. Modele DTO są w `models.ts`; katalog, tożsamość, dostęp i historię sprawdza 
+    dekoder kształtu przed renderowaniem. Pozostałe odpowiedzi mają typy TS bez pełnego dekodowania runtime. 
+    CRUD nie jest wystawiony jako osobne `PATCH/DELETE` zasobu. |
+| Stan | Rozdzielenie stanu lokalnego, współdzielonego i serwerowego; spójna aktualizacja | 
+    Lokalne: skarbiec IndexedDB i szkice w pamięci; 
+    wspólne w Pracowni: `state` koordynatora i moduły sekcji; 
+    serwerowe: projekcja `Directory`/API. `mount/3` i `assign/3` trzymają ulotny układ LiveView, 
+    `phx-click` / `handle_event/3` obsługują zmianę. 
+    Podpisane zapisy prowadzą do odczytu świeżego stanu; utracony wynik jest uzgadniany po ID zdarzenia. |
+| UI | Komponenty wspólne, semantyka i spójne statusy | 
+    Wspólny `app.css`, `Layouts`, `PublicComponents`, `assets/js/lib/ui.ts`; 
+    etykiety i stany puste, `aria-current`, `aria-pressed`, tekstowe statusy oraz fokus. 
+    Typowany hook `CatalogFocus` używa `mounted/updated/destroyed` i `AbortController`, 
+    co odpowiada efektowi i cleanupowi komponentu. Pełny audyt czytnikiem ekranu nie był wykonywany. |
+
+TypeScript obejmuje cykl życia hooka LiveView, operacje DOM, stan skarbca i publikacji, bajty oraz podpisy. 
+`tsconfig.json` używa pełnego `strict`, w tym `noImplicitAny`, `strictNullChecks` i nieznanych wyjątków. 
+`failure.ts` normalizuje błędy przeglądarki, `models.ts` sprawdza kluczowe projekcje odczytu, 
+a sekcje formularzy przekazują jawnie typowane zależności. 
+Wspólny konstruktor DOM jest dynamicznym adapterem z jawnymi `any`; 
+część odpowiedzi API ma typy bez walidatora runtime. 
+
+Nie stosujemy Chart.js, ponieważ w obecnym katalogu wykres nie wnosi danych potrzebnych użytkownikowi; 
+podana przez prowadzącą biblioteka była przykładem scenariusza. 
+`phoenix`/`phoenix_live_view` z npm to realna integracja hooka. 
+
+Po `npm ci` uruchom `npm run typecheck`, `npm run lint` i `npm run build`. 
+Build transpiluje `assets/js/**/*.ts` do tych samych ścieżek w `priv/static/assets/js`, 
+po czym bundluje `assets/catalog.ts` do `live/catalog.js`. 
+Wynik JS jest dołączony do wydania, więc uruchomienie serwera po `mix setup` nie wymaga npm. 
+Plik deklaracji `assets/js/vendor/noble-ed25519.d.ts` opisuje API dostarczanej osobno biblioteki; 
+źródło biblioteki pozostaje w `priv/static/assets/js/vendor/`.
+
 ## Struktura projektu
 
 ```
 oktavarium/
+  assets/                   TypeScript
   config/                   config.exs (wspólne), dev/test/prod.exs, runtime.exs (środowisko)
   lib/
     oktavarium.ex           opis warstw

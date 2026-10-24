@@ -44,8 +44,14 @@ Projekt jest udostępniony na licencji **MIT**; pełny tekst w pliku [LICENSE](L
 ### Wymagania
 Należy zainstalować `>=erlang::27.3.4` i `>=elixir::1.18.4` w środowisku:
 [elixir-lang.org/install](https://elixir-lang.org/install/).
+Testy tej wersji przeprowadzono na Elixirze 1.18.4 i Erlang/OTP 25.3.2.8.
+
+Przy przebudowie całej warstwy skryptów przeglądarkowych potrzebne są także Node.js 
+(co najmniej 20.19) i npm (`npm ci`, `npm run typecheck`, `npm run build`). 
+Zbudowane pliki JS są już dołączone, więc samo uruchomienie serwera nie wymaga npm.
 
 Baza to jeden plik SQLite, więc osobny serwer bazy danych nie jest potrzebny.
+Treści i media są przechowywane osobno w katalogu blobów; kopia samej bazy nie wystarcza do odtworzenia publikacji.
 
 ### Środowisko
 
@@ -92,8 +98,11 @@ a przebiegi od początku do końca [docs/02-requirements.md](docs/02-requirement
 ### Testy
 
 ```sh
-mix test                        # przygotowuje bazę testową i uruchamia wszystkie testy Elixira
-node --test test/js/*_test.mjs  # wbudowany mechanism testowy Node.js
+npm ci                              # przygotowanie lokalnych zależności TypeScript/LiveView
+mix precommit                       # kompilacja, testy, typy TS, ESLint i build
+npm audit --audit-level=moderate    # osobno: przegląd podatności npm
+mix test                            # osobno: testy Elixira, z przygotowaniem bazy testowej
+node --test test/js/*_test.mjs      # osobno: wbudowany mechanizm testowy Node.js
 ```
 
 W `test/e2e` są też scenariusze testowe end-to-end dla przeglądarki.
@@ -154,6 +163,8 @@ mix phx.server
 ```
 
 Na produkcji rejestracja nowych tożsamości przez HTTP jest domyślnie zamknięta. 
-Operator może wprowadzać przygotowane, podpisane zdarzenia za pomocą 
-`mix oktavarium.ingest` albo świadomie włączyć rejestrację. 
+Operator może wystawić zaproszenie (`mix oktavarium.invite --uses 1 --days 7`),
+wprowadzić przygotowane, podpisane zdarzenie za pomocą `mix oktavarium.ingest`
+albo świadomie włączyć rejestrację. Token zaproszenia podaje się na `/join`
+lub w nagłówku `X-Oktavarium-Invite` przy wysyłaniu genesis przez HTTP.
 Własne strony powinny korzystać z oddzielnego hosta i odpowiednio skonfigurowanego DNS.

@@ -2,7 +2,7 @@
 // podpisują koperty, a serwer (Elixir) je weryfikuje. Wypisuje JSON na stdout.
 import { generateKey, sign, eventId } from "../../priv/static/assets/js/lib/crypto.js";
 import { buildEnvelope } from "../../priv/static/assets/js/lib/envelope.js";
-import { enc, b64u } from "../../priv/static/assets/js/lib/bytes.js";
+import { enc } from "../../priv/static/assets/js/lib/bytes.js";
 
 const founder = await generateKey("signing");
 const auth = await generateKey("auth");

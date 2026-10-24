@@ -7,7 +7,12 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 
 test("public reads require neither login nor a CSRF token", async (t) => {
   const calls = [];
-  t.mock.method(globalThis, "fetch", async (path, options) => { calls.push({ path, options }); return json({}); });
+  t.mock.method(globalThis, "fetch", async (path, options) => {
+    calls.push({ path, options });
+    return json(path.includes("/access/")
+      ? { identity: "person", key: "key", signing_key: false, founder: false, grants: [], checked_at: "2026-10-24T00:00:00Z" }
+      : { identity: "person", project: { id: "project", slug: "project", meta: {}, meta_refs: {}, site_url: null }, resources: [] });
+  });
   setCsrf(null);
   await access("person", "key");
   await project("person", "project");
@@ -17,12 +22,14 @@ test("public reads require neither login nor a CSRF token", async (t) => {
     assert(!("x-csrf-token" in options.headers));
   }
 });
+
 test("cancelled signing makes no HTTP request", async (t) => {
   const calls = [];
   t.mock.method(globalThis, "fetch", async (...args) => { calls.push(args); return json({}); });
   await assert.rejects(() => publish({ signer: {}, identity: "I", type: "project.delete", body: {}, confirm: async () => false }), e => e.cancelled);
   assert.equal(calls.length, 0);
 });
+
 test("a sequence conflict is surfaced instead of re-signing silently", async (t) => {
   const calls = [];
   const signer = await generateKey("signing", "test");
@@ -35,6 +42,7 @@ test("a sequence conflict is surfaced instead of re-signing silently", async (t)
   assert.equal(calls.filter(c => c.options.method === "POST").length, 1);
   assert.equal(calls.length, 2);
 });
+
 test("v2 project signatures include detached text attachments", async (t) => {
   const signer = await generateKey("signing", "test");
   const identity = "A".repeat(43);

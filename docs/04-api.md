@@ -29,166 +29,201 @@ Wszystkie zasoby opisane niżej wystawia sam projekt, co pozwala na zachowanie c
 
 ### Co jest po stronie klienta
 
-Strony HTML renderuje serwer, JavaScript jest używany dla funkcji autoryzacji sesji, podpisywania i edycji.
-Klient "piszący" to CLI w tym samym repozytorium (`mix oktavarium.*`),
-albo autoryzowana sesja w przeglądarce, 
-który podpisuje zdarzenia lokalnie i wysyła je przez `POST /api/events`.
-Przeglądarka jest szczególnym rodzajem klienta, który korzysta z tego samego API, co narzędzie CLI, 
-którego klucze autoryzacji i sygnowania trzymane są zaszyfrowane i lokalnie.
+Przeglądarka generuje pary Ed25519, szyfruje lokalny skarbiec, 
+buduje kopertę zdarzenia i podpisuje dokładne bajty `payload`. 
+Do serwera trafiają klucze **publiczne**, podpisy, podpisane payloady i jawnie przesłane treści/pliki. 
+Serwer sprawdza uprawnienia i nigdy nie otrzymuje prywatnych kluczy ani hasła skarbca. 
+`/login` odblokowuje skarbiec lokalnie; osobne `/api/session` służy tylko do uzyskania sesji przesyłania blobów. 
+Publiczny katalog jest początkowo renderowany jako HTML LiveView i działa bez JS; 
+z JS może utrzymywać połączenie `/live` do filtrowania i zmiany układu. 
+To połączenie nie zastępuje podpisanego REST API do publikacji.
 
 ## Zasoby
 
-| Zasób | Co oznacza |
-| ----- | ---------- |
-| **Tożsamość** | Osoba albo kolektyw. Ma stałe ID, opcjonalny uchwyt, profil i własny dziennik. |
-| **Projekt** | Kontener zasobów należący do tożsamości. Ma stabilne ID i zmienialny slug. |
-| **Zasób** | Obraz, nagranie lub plik strony; ma ID, ścieżkę, hash i metadane. |
-| **Blob** | Bajty pliku opisane skrótem SHA-256. |
-| **Zdarzenie** | Podpisana operacja zmieniająca stan. |
-| **Grant** | Zapis mówiący, który klucz może wykonać jaką czynność i gdzie. |
+| Zasób | Identyfikator | Operacje |
+| ----- | ------------- | -------- |
+| Tożsamość | Skrót genesis jako ID base64url; opcjonalny uchwyt, `person`/`collective`, `public`/`unlisted` | Genesis, profil, widoczność, klucze, granty, projekty i zasoby. |
+| Dziennik | Osobny łańcuch per ID, `seq` od zera, poprzednik `prev`; ID zdarzenia to skrót podpisanego payloadu | Publiczny odczyt głowy, kopert i potwierdzenia pojedynczego zdarzenia; dopisywanie kopert. |
+| Projekt | Trwałe ID z `project.create`, zmienny `slug`, metadane i własne pliki | Utworzenie, zmiana, usunięcie pustego projektu. |
+| Plik/zasób | Trwałe ID, `path` i opcjonalny `project_id`, skrót SHA-256 bajtów, rozmiar, MIME, metadane | Publikacja/zmiana/przeniesienie przez `resource.put`, usunięcie referencji przez `resource.delete`; publiczny odczyt/pobranie. |
+| Blob | 64-znakowy małoliterowy SHA-256, bajty poza SQLite | Upload po sesji, strumieniowany publiczny odczyt opublikowanego obrazu/audio, bezpieczny download źródła. |
+| Grant | ID, podpisujący wystawca, klucz odbiorcy, akcja, ścieżka, granice czasu, opcjonalne delegowanie/rodzic | Podpisane `grant.create` / `grant.revoke`, publiczna analiza dostępu. |
+| Sesja / zaproszenie | Losowe tokeny przechowywane na serwerze jako skróty | Krótka sesja uploadu; token zaproszenia uprawniający tylko do genesis przy rejestracji `closed`. |
 
-Typy zdarzeń (pole `type` w ładunku):
-`identity.genesis`, `grant.create`, `profile.update`.
-Treść każdego opisuje [05-architecture.md](05-architecture.md), "Typy zdarzeń".
+Tekstowe wartości w `profile.update` oraz metadanych `project.create`, `project.update`, `resource.put` są w payloadzie zastępowane referencjami `{"sha256":"..."}`. Pole `attachments` w przesyłanej kopercie może przenieść odpowiadające im bajty UTF-8; serwer sprawdza ich hash i zapisuje w blobach, lecz nie przechowuje attachments w tabeli zdarzeń. `null` usuwa pole profilu. Historyczne skróty, ścieżki, typy i klucze pozostają w dzienniku.
 
 ## Endpointy
 
-### Publiczne strony HTML
+Prefiks `/api` oznacza JSON. Odczyt jest publiczny również dla tożsamości `unlisted` znanej po adresie; jej rekord nie trafia do indeksu. `:ref` przy profilach i projektach oznacza uchwyt lub ID. Dziennik przyjmuje **ID tożsamości** jako `:id`, nie uchwyt. Wszystkie zapisy stanu poza genesis to podpisane `POST /api/events`, nie osobne `PATCH`/`DELETE` dla profilu i plików.
 
-| Metoda | Ścieżka | Opis |
+### API (JSON)
+
+| Metoda i adres | Żądanie / odpowiedź | Dostęp |
 | --- | --- | --- |
-| `GET` | `/` | Odkrywaj. Filtry przez `?view=images`, `audio`, `projects`, `people`. |
-| `GET` | `/i/:ref` | Profil osoby lub kolektywu po uchwycie albo ID. |
-| `GET` | `/i/:ref/projects/:project_id` | Publiczny widok projektu. |
-| `GET` | `/join` | Formularz tworzenia tożsamości. |
-| `GET` | `/login` | Odblokowanie i przywracanie skarbca. |
-| `GET` | `/studio` | Pracownia. |
+| `POST /api/events` | Koperta `{payload, signer, signature, attachments?}`; `201 {id, identity, seq, type}`. | Publiczne HTTP; reguły podpisu, łańcucha, grantów; genesis w `closed` wymaga `X-Oktavarium-Invite`. |
+| `GET /api/identities` | `{identities:[{id, handle, kind, display_name, avatar_url}]}`; indeks tylko `public`. | Publiczny. |
+| `GET /api/identities/:ref` | Profil, `profile_refs`, widoczność, klucze, członkowie, granty, zasoby, projekty, `site_url`, `integrity`, głowa. | Publiczny, również bezpośredni `unlisted`. |
+| `GET /api/identities/:ref/projects` | `{identity, projects:[...]}`. | Publiczny. |
+| `GET /api/identities/:ref/projects/:project_id` | `{identity, project:{id,slug,meta,meta_refs,site_url,scope}, resources:[...]}`. | Publiczny. |
+| `GET /api/identities/:ref/access/:key` | Migawka uprawnień klucza `{identity,key,signing_key,founder,grants,checked_at}`; `Cache-Control: no-store`. | Publiczny; nie jest tokenem uprawniającym do zapisu. |
+| `GET /api/identities/:id/head` | `{identity,seq,id}` ostatniego zdarzenia. | Publiczny. |
+| `GET /api/identities/:id/events?after=N` | `{identity,head,events:[{payload,signer,signature}]}`; bez `after` od genesis, z `after` po numerze `N ≥ 0`. | Publiczny; bez limitu strony. |
+| `GET /api/identities/:id/events/:event_id` | `{id,identity,seq,type,envelope:{payload,signer,signature}}` dla dokładnej pary; `Cache-Control: no-store`; brak → `404 event_not_found`. | Publiczny; służy do sprawdzenia niepewnego wyniku zapisu. |
+| `POST /api/session/challenge` | Bez parametrów; `{nonce,host,message,expires_at}`. | Publiczny. |
+| `POST /api/session` | `{nonce,key,signature}` → `{key,csrf,identities:[...]}` i ciasteczko. | Aktywny klucz `auth` powiązany z tożsamością. |
+| `GET /api/me` | `{key,csrf,identities:[...]}` lub `401 unauthenticated`. | Sesja uploadowa. |
+| `DELETE /api/session` | `{ok:true}`. | Sesja i nagłówek `X-CSRF-Token`. |
+| `POST /api/blobs` | **Surowe bajty**, `Content-Type` i `X-CSRF-Token`; `201 {hash,size,media_type}`. Nie jest to JSON ani multipart. | Sesja i CSRF. |
+| `GET /api/identities/:ref/resources/:resource_id/download` | Bajty źródłowe z `Content-Disposition: attachment` i `application/octet-stream`; brak → `404 unknown_resource`. | Publiczny, także dla źródeł HTML/JS/SVG. |
 
-### Odczyt API (JSON)
+Odpowiedź szczegółów tożsamości ma `auth_keys:[{key_id,status}]`, `members:[{key_id,label,status}]`, 
+`grants` z akcją, zakresem, wystawcą, odbiorcą, rodzicem, 
+`status` i datami, `resources` z `available`, `kind`, `path`, 
+`project_id`, `hash`, `size`, `media_type`, `meta`, `meta_refs`. 
+`projects` zawiera ID, slug, meta, meta_refs, URL strony. 
+Wartość `integrity` to `"ok"` lub `"error"`. Stan `unlisted` jest metadanym, nie bramką dostępu.
 
-| Metoda | Ścieżka | Opis |
+### Minimum integracyjne z wymagań projektowych (s. 19)
+
+Ważnym zasobem są **projekty**. 
+Operacje faktycznie zapisują stan w SQLite, lecz API publikacji jest dziennikiem podpisanych komend, 
+zamiast osobnym kontrolerem REST dla każdej metody HTTP:
+
+| Zadanie użytkownika | Wywołanie HTTP z Pracowni | Efekt i odświeżenie UI |
 | --- | --- | --- |
-| `GET` | `/api/identities` | Katalog tożsamości `public` (bez `unlisted`). |
-| `GET` | `/api/identities/:ref` | Profil, zasoby, projekty, klucze publiczne, granty i stan dziennika. |
-| `GET` | `/api/identities/:ref/projects` | Projekty danej tożsamości. |
-| `GET` | `/api/identities/:ref/projects/:project_id` | Szczegóły projektu i jego zasoby. |
-| `GET` | `/api/identities/:ref/access/:key` | Informacja o uprawnieniach klucza. **Nie jest to token zapisu.** |
-| `GET` | `/api/identities/:id/head` | Numer i ID ostatniego zdarzenia. |
-| `GET` | `/api/identities/:id/events?after=N` | Podpisane koperty zdarzeń od podanego miejsca. |
-| `GET` | `/api/identities/:id/events/:event_id` | Sprawdzenie, czy konkretne zdarzenie znajduje się w dzienniku. |
-| `GET` | `/api/identities/:ref/resources/:resource_id/download` | Pobranie pliku jako załącznika. |
-| `GET` | `/blobs/:hash` | Bajty dostępnego, publicznie opublikowanego materiału. |
+| Odczyt | `GET /api/identities/:ref/projects` lub szczegóły `GET .../projects/:project_id` | `assets/js/lib/api.ts` obsługuje żądanie i odpowiedź JSON do widoku; pusta lista ma komunikat. |
+| Utworzenie | `POST /api/events` z typem `project.create` | Trwałe ID i projekt w projekcji; Pracownia ponownie pobiera szczegóły. |
+| Aktualizacja | `POST /api/events` z typem `project.update` | Zmiana slug/metadanych po sprawdzeniu podpisu i uprawnienia; klient odświeża stan. |
+| Usunięcie | `POST /api/events` z typem `project.delete` | Usunięcie pustego projektu z projekcji, wpis pozostaje w dzienniku; UI odświeża listę. |
 
-Parametr `:ref` może być uchwytem lub ID. W trasach `/head`, `/events` i wyszukiwaniu potwierdzenia zdarzenia `:id` oznacza **ID tożsamości**, nie jej uchwyt.
+Warstwa `assets/js/lib/api.ts` jest oddzielona od kodu formularzy i kompilowana do `/assets/js/lib/api.js`. 
+Typuje opcje żądania, błędy i nierozstrzygniętą próbę publikacji. 
+Klient ma timeouty `AbortSignal.timeout`, kody błędów mapowane na polskie komunikaty, 
+stany ładowania/pustego wyniku w Pracowni i ponowne odczytanie stanu po zapisie. 
+Niepewny wynik POST jest sprawdzany po identyfikatorze zdarzenia; 
+konflikt sekwencji nie podpisuje automatycznie innej operacji. 
 
-### Zapis i sesja
+Klient deklaruje modele DTO w `assets/js/lib/models.ts`; 
+przed użyciem katalogu, szczegółów tożsamości, migawki dostępu i historii 
+sprawdza podstawowy kształt JSON i odrzuca nieprawidłową projekcję. 
+Odpowiedzi sesji, uploadu, potwierdzeń oraz osobnych tras projektowych mają typy TS, 
+lecz nie osobne dekodery runtime; serwer pozostaje autorytatywny dla walidacji zapisu. 
 
-| Metoda | Ścieżka | Wymaganie | Opis |
-| --- | --- | --- | --- |
-| `POST` | `/api/events` | Podpisana koperta | Dopisanie zdarzenia, w tym utworzenie tożsamości. |
-| `POST` | `/api/session/challenge` | Brak sesji | Przygotowanie wyzwania do logowania kluczem autoryzacji. |
-| `POST` | `/api/session` | Podpis wyzwania | Utworzenie sesji i zwrócenie tokenu CSRF. |
-| `GET` | `/api/me` | Sesja | Dane bieżącej sesji. |
-| `DELETE` | `/api/session` | Sesja i CSRF | Zakończenie sesji. |
-| `POST` | `/api/blobs` | Sesja i CSRF | Przesłanie surowych bajtów pliku. |
+Parametry `view`, `before`, `after` i `ref` mają konkretne znaczenie; 
+nie istnieje dowolna wyszukiwarka `q`. 
+Slajd minimum integracyjnego używa nazwy `docs/03-api.md`, 
+podczas gdy wymagany układ dokumentów z etapu przygotowania 
+wskazuje `docs/04-api.md`; tutaj zachowano ten drugi układ.
 
-Wysyłając blob, klient podaje typ materiału w `Content-Type`. Dla żądań wymagających CSRF przesyła także nagłówek `x-csrf-token`. Samo wrzucenie bloba **nie tworzy publikacji**: potrzebne jest późniejsze `resource.put`.
+#### `POST /api/events`
 
-### Przykłady odczytu
+`payload` jest base64url bez paddingu i dekoduje się do 
+**dokładnych bajtów JSON** podpisanych Ed25519 w domenie `oktavarium/event/v1\0`. 
+Wewnątrz ma pola `v:2`, `signer`, `identity`, `seq`, `prev`, `type`, `body`, `ts` (sekundy Unix). 
+`signer` na zewnątrz to base64url 32-bajtowego klucza publicznego, 
+`signature` to base64url 64-bajtowego podpisu. 
+Genesis ma `identity:null`, `seq:0`, `prev:null`, a ID tożsamości jest ID tego zdarzenia. 
+Pozostałe zdarzenia wskazują ID tożsamości, kolejny numer i ID poprzednika. 
+Sposób serializacji payloadu wpływa na podpis i ID, 
+więc klient nie może go ponownie zakodować między podpisem a wysyłką.
+
+Serwer obsługuje 14 typów: 
+`identity.genesis`, `identity.visibility.set`, `profile.update`, `grant.create`, 
+`grant.revoke`, `key.add`, `key.revoke`, `auth_key.add`, `auth_key.revoke`, 
+`project.create`, `project.update`, `project.delete`, `resource.put`, `resource.delete`. 
+Dla `resource.put` blob musi być już zapisany i musi odpowiadać deklarowanemu hash/rozmiarowi/MIME.
+
+#### `GET /api/identities/:id/head`
+
+Wynik `seq` i `id` służy do przygotowania następnego zdarzenia (`seq + 1`, `prev = id`). 
+Dwa niezależne zapisy o tym samym numerze nie tworzą gałęzi; jeden może otrzymać konflikt `bad_seq`.
+
+#### `GET /api/identities/:id/events?after=N`
+
+Zwraca koperty bez `attachments`, bo bajty tekstu są przechowywane osobno. 
+Należy sprawdzić podpisy, ID i łańcuch, a następnie podążyć za `head`, jeśli odczyt ma obejmować cały dziennik. 
+`after` jest numerem sekwencji, nie identyfikatorem zdarzenia.
+
+### Strony (HTML)
+
+| Adres | Znaczenie |
+| --- | --- |
+| `/` oraz `?view=all/images/audio/projects/people` | Katalog LiveView: początkowy HTML, adresy filtrów, opcjonalna aktualizacja po WebSocket. |
+| `/i/:ref` | Publiczny profil z historią; `?before=N` dla wcześniejszych zdarzeń (50 na stronę). |
+| `/i/:ref/projects/:project_id` | Publiczna strona projektu. |
+| `/join`, `/login`, `/studio` | Powłoki aplikacji przeglądarkowej; wymagają JS. |
+| `/blobs/:hash` | Tylko obecnie opublikowany obraz/audio, `200` albo `206` dla `Range`, `416` dla błędnego zakresu; inne hashe → `404`. |
+| `<handle>.<sites_domain>/*` i `p-<base32-id>.<sites_domain>/*` | Strona tożsamości/projektu z plików `site/`, jeśli skonfigurowano domenę i index; `GET`/`HEAD`, `304` na ETag, inne metody `405`. |
+
+Host tożsamości wymaga uchwytu zgodnego z DNS (małe litery/cyfry/myślnik, 2–32 znaki); 
+poprawny uchwyt zawierający `_` nadal nadaje się na profil, ale nie na subdomenę. 
+Host projektu koduje jego trwałe ID, zatem zmiana slug nie zmienia adresu strony. 
+Na hoście strony nie ma API głównej aplikacji; inline JS blokuje CSP, 
+a pliki CSS/JS z tej strony mogą działać w osobnym origin.
+
+`/live` jest gniazdem Phoenix LiveView dla katalogu, 
+nie endpointem JSON ani publicznym interfejsem do dopisywania zdarzeń. 
+Filtry `?view=` są nadal zwykłymi adresami HTTP. 
+Token CSRF w dokumencie umożliwia połączenie LiveView; 
+nie jest tokenem `X-CSRF-Token` sesji uploadowej wydawanym przez `POST /api/session`.
+
+### Przykład użycia
+
+Zakładając wcześniej utworzoną podpisaną kopertę CLI w `events/ja-0.json` i otwartą rejestrację:
 
 ```sh
-# Publiczny profil
-curl http://localhost:4000/api/identities/PRZYKLADOWY_UCHWYT
+curl -H 'Content-Type: application/json' --data-binary @events/ja-0.json \
+  http://localhost:4000/api/events
 
-# Ostatnie zdarzenie (ID, nie uchwyt)
 curl http://localhost:4000/api/identities/ID_TOZSAMOSCI/head
-
-# Projekty
-curl http://localhost:4000/api/identities/PRZYKLADOWY_UCHWYT/projects
+curl 'http://localhost:4000/api/identities/ID_TOZSAMOSCI/events?after=0'
+curl http://localhost:4000/api/identities/ID_TOZSAMOSCI/events/ID_ZDARZENIA
 ```
 
-## Podpisane zdarzenia
-
-Zdarzenia są przesyłane do `POST /api/events` jako JSON. Przykładowy **kształt** koperty:
-
-```json
-{
-  "payload": "BASE64URL_PODPISANEGO_JSON",
-  "signer": "ID_KLUCZA_SYGNOWANIA",
-  "signature": "BASE64URL_PODPISU"
-}
-```
-
-W wersji koperty **v2** mogą występować też `attachments`: tekstowe załączniki potrzebne do zapisu pól profilu lub metadanych. Nie są one częścią trwałego dziennika.
-
-Po zdekodowaniu `payload` zawiera między innymi: `v`, `signer`, `identity`, `seq`, `prev`, `type`, `body` i `ts`. Przykładowe typy operacji:
-
-| Typ | Działanie |
-| --- | --- |
-| `identity.genesis` | Utworzenie tożsamości. |
-| `profile.update`, `identity.visibility.set` | Zmiana profilu lub widoczności. |
-| `project.create`, `project.update`, `project.delete` | Utworzenie, zmiana i usunięcie projektu. |
-| `resource.put`, `resource.delete` | Dodanie, aktualizacja, przeniesienie lub usunięcie zasobu. |
-| `grant.create`, `grant.revoke` | Nadanie albo cofnięcie grantu. |
-| `key.add`, `key.revoke`, `auth_key.add`, `auth_key.revoke` | Operacje na kluczach. |
-
-Kopertę można przygotować przez CLI. Nie da się stworzyć prawidłowego podpisu, podmieniając tekst w przykładowym JSON-ie.
-
-Przyjęty zapis zwraca `201 Created` i dane zdarzenia, np. jego `id`, `identity`, `seq` i `type`. Następne zdarzenie musi wskazać właściwą głowę dziennika przez `seq` i `prev`.
-
-## Autoryzacja
-
-**Odczyt** katalogu, profilu, projektów i historii nie wymaga sesji. Dotyczy to również `unlisted`, jeśli zna się adres.
-
-**Podpisywanie zmian** jest niezależne od cookie: serwer sprawdza podpis Ed25519 i uprawnienia klucza. 
-Założyciel ma pełny dostęp w swojej tożsamości; współpracownik działa w granicach grantów.
-
-**Upload plików** wymaga sesji uzyskanej po podpisaniu wyzwania kluczem autoryzacji. 
-Sesja nie zastępuje podpisu `resource.put`.
-
-Przy zamkniętej rejestracji utworzenie tożsamości przez HTTP wymaga ważnego zaproszenia w nagłówku `x-oktavarium-invite`.
-Operator może też wczytać podpisane zdarzenie lokalnie.
+Przy `closed` genesis wymaga dodatkowo `-H 'X-Oktavarium-Invite: TOKEN'`. Do uploadu potrzeba odpowiedzi na wyzwanie podpisanej **kluczem autoryzacji**, ciasteczka i wartości CSRF; samo przesłanie bajtów nie publikuje pliku. Przeglądarka wykonuje tę sekwencję automatycznie po potwierdzeniu operacji.
 
 ## Błędy
 
-API zwraca kod HTTP i czytelny kod błędu:
+Błędy domenowe mają kształt `{"error":{"code":"...", ...}}`. 
+Przykłady: `400 invalid_envelope` z `reason`; 
+`401 unauthenticated`, `invalid_challenge`, `bad_signature`, `unknown_key`; 
+`403 not_authorized` (czasem `field`), `registration_closed`, `invalid_invite`, `invalid_csrf`, `broken_chain`; 
+`404 unknown_identity`, `unknown_project`, `unknown_resource`, `blob_not_found` albo `event_not_found` przy potwierdzeniu; 
+`409 bad_seq` z `expected_seq`, `duplicate_event`, `bad_prev`, `project_slug_taken`, `resource_path_taken`; 
+`413 too_large`; 
+`415 unsupported_media_type`/`media_type_mismatch`; 
+`422 invalid_body` z `field`, `content_missing` z `detail`. 
+Odrzucenie przez sam framework (np. limit parsera JSON lub niepasująca trasa) 
+może mieć inny kod błędu niż walidacja domenowa.
 
-```json
-{
-  "error": {
-    "code": "bad_seq",
-    "expected_seq": 4
-  }
-}
-```
+Brak potwierdzenia HTTP po wysłaniu podpisanego zdarzenia **nie dowodzi**, że serwer je odrzucił. 
+Klient sprawdza `GET .../events/:event_id` i porównuje całą kopertę. 
+Gdy zdarzenia nie widać, może bezpiecznie ponowić dokładnie tę samą kopertę; 
+przy konflikcie sekwencji trzeba pobrać głowę i ponownie zatwierdzić nowy zapis.
 
-Najczęstsze sytuacje:
+## Autoryzacja
 
-| HTTP | Przykładowy kod | Znaczenie |
-| --- | --- | --- |
-| `400` | `invalid_envelope` | Niepoprawna koperta albo podpis. |
-| `401` | `unauthenticated` | Brak potrzebnej sesji. |
-| `403` | `not_authorized`, `registration_closed` | Brak prawa do operacji lub zamknięta rejestracja. |
-| `404` | `unknown_identity`, `unknown_project`, `event_not_found` | Nie znaleziono wskazanego obiektu. |
-| `409` | `bad_seq`, `bad_prev`, `project_slug_taken`, `resource_path_taken` | Konflikt z aktualnym stanem. |
-| `413` / `415` | `too_large`, `unsupported_media_type` | Za duży plik lub niewspierany format. |
-| `422` | `invalid_body`, `invalid_window` | Nieprawidłowe dane operacji. |
+Do czytania nie potrzeba konta, ciasteczka ani sesji. 
+`POST /api/events` ufa wyłącznie podpisanej kopercie, aktywnemu członkostwu klucza i ważnemu zakresowi grantu. 
+Założyciel ma pełny zakres we własnej tożsamości; 
+granty mogą ograniczać akcje i ścieżki oraz być dalej delegowane tylko po spełnieniu warunków rodzica. 
+Czasy grantów liczy zegar serwera. 
+Genesis w trybie zamkniętym jest wyjątkiem: 
+jednorazowy token zaproszenia trafia w nagłówku, a zużycie i zapis są atomowe w SQL.
 
-`event_not_found` oznacza, że zdarzenie nie zostało znalezione w chwili odczytu. Po utraconej odpowiedzi nie jest to jeszcze pewny dowód, że wcześniejszy zapis nie dotrze.
+`POST /api/session/challenge` wydaje ważny przez 300 sekund nonce powiązany z hostem. 
+Klient podpisuje `host + "\n" + nonce` domeną logowania, a `POST /api/session` konsumuje wyzwanie. 
+Sesja trwa do 7 dni, zapisuje tylko skrót losowego tokenu i przestaje działać po 
+cofnięciu wszystkich aktywnych powiązań klucza `auth`. `DELETE /api/session` i `POST /api/blobs` 
+wymagają poprawnego `X-CSRF-Token`. 
+Odblokowanie skarbca w przeglądarce samo nie zakłada takiej sesji.
 
-## Ograniczenia
+## Ograniczenia wybranego rozwiązania
 
-- Instancja jest przewidziana dla małej społeczności. Nie ma federacji ani automatycznej replikacji.
-- Własne strony HTML/CSS/JS działają tylko przy skonfigurowanej domenie stron (`OKTAVARIUM_SITES_DOMAIN`).
-- API nie zapewnia prywatności profili ani dzienników. `unlisted` to brak wyświetlania w katalogu, nie kontrola odczytu.
-- Nie ma pełnego systemu automatycznego ograniczania liczby żądań; publiczny serwer wymaga dodatkowej ochrony operatora.
-- Zapis danych do bazy i blobów jest serializowany, przez co współbieżność zapisów jest ograniczona do niezależnych dzienników.
-
-Przy wdrożeniu produkcyjnym wymagane zmienne: 
-`DATABASE_PATH` (ścieżka pliku SQLite),
-`SECRET_KEY_BASE`; 
-opcjonalne: 
-`PHX_HOST`, `PORT`, `POOL_SIZE`, 
-`OKTAVARIUM_REGISTRATION`, 
-`OKTAVARIUM_BLOB_DIR`, 
-`OKTAVARIUM_SITES_DOMAIN`.
+| Obszar | Rzeczywisty skutek |
+| --- | --- |
+| SQLite / pojedyncza instancja | Zapisy się szeregują. Brak pomiarów obciążenia i replikacji/federacji. |
+| Dziennik i treści | Podpisy oraz hash tekstu pozostają, ale usuniętych bajtów nie da się odtworzyć z samego logu; `resource.delete` usuwa referencję, nie automatycznie plik bloba. |
+| Indeks i historia | Brak wyszukiwania `q`, paginacji katalogu i limitu stron w REST API dziennika; HTML profil pokazuje 50 wpisów na stronę. |
+| Ochrona usługi | Kod nie ogranicza częstotliwości wyzwań, uploadów ani innych żądań. Publiczny odczyt `unlisted` nadal ujawnia dane znającym adres. |
+| Strony WWW | Potrzebna osobna domena DNS i konfiguracja; bez niej `site_url` jest `null`. Serwowanie ogranicza się do opublikowanych ścieżek i wybranych MIME. |

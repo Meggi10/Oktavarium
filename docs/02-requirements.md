@@ -206,21 +206,68 @@ Priorytet:
 | Wymaganie | Priorytet |
 | --------- | --------- |
 | Katalog tożsamości: nazwa, uchwyt, początek opisu, rodzaj, liczba zdarzeń, skrót głowy; stan pusty z instrukcją | MVP |
+| Katalog z filtrami `view=all/images/audio/projects/people`; publiczne profile i projekty z multimediami filtry są obsługiwane przez `DiscoverLive.handle_params/3` i adresy URL, zestawienia mają limity liczby pozycji | MVP |
 | Strona tożsamości pod uchwytem lub identyfikatorem; adres z identyfikatorem przekierowuje na adres z uchwytem | MVP |
 | Na stronie: profil, dane identyfikacyjne, klucze publiczne, tabela uprawnień ze stanem (aktywny, unieważniony, wygasły, oczekujący, uszkodzony łańcuch), dziennik ze stronicowaniem | MVP |
 | Wskaźnik integralności dziennika (serwer weryfikuje podpisy i łańcuch przy każdym wyświetleniu) oraz odnosnik do pobrania JSON | MVP |
 | Wyszukiwanie tożsamości po nazwie, uchwycie, rodzaju | MVP |
 | Strony projektów, zasobów, repozytoriów i moduły tożsamości (strona główna, pliki) | Dodatkowe |
-| Tożsamości o widoczności `restricted` ukryte w katalogu (dziś ukrywane na stronach, ale nie w API) | Dodatkowe |
+| Tożsamości o widoczności `restricted` ukryte w katalogu (dziś ukrywane na stronach, ale nie w API `?q=`) | Dodatkowe |
 
-### Przeglądarka
+### API i narzędzia operatora
+
+| Funkcja | Stan |
+| --- | --- |
+| REST: zapisy zdarzeń, odczyt tożsamości/projektów/zasobów/uprawnień, dziennik/głowa/potwierdzenie, wyzwanie/sesja/upload | zrealizowane; kompletna lista w [04-api.md](04-api.md) |
+| CLI: klucze, zdarzenia, projekty, pliki, upload lokalny, wysyłka/ingest, weryfikacja, odbudowa, zaproszenia | zrealizowane; szczegóły w [05-architecture.md](05-architecture.md) |
+| Produkcyjnie zamknięta rejestracja, opcjonalny token zaproszenia w nagłówku dla genesis | zrealizowane |
+| Limity częstotliwości żądań, zautomatyzowane kopie produkcyjne i procedura wydania jako release | brak w repozytorium |
+
+### Przeglądarka internetowa
 
 | Wymaganie | Priorytet |
 | --------- | --------- |
 | Generowanie kluczy i podpisanie zdarzenia `genesis`, z użyciem ważnego zaproszenia (jeśli rejestracja zamknięta, lub bez) w przeglądarce | MVP |
+| `/join`, `/login`, `/studio`, lokalny skarbiec, osobne potwierdzenie każdej operacji, projekty/pliki/granty/klucze; wymaga JavaScript, WebCrypto i IndexedDB | MVP |
 | Autoryzacja sesji w przeglądarce podpisanym wyzwaniem (passkey) | MVP |
 | Edycja profilu i zarządzanie uprawnieniami w przeglądarce | MVP |
 | Edycja i dodawanie zasobów w przeglądarce | MVP |
+
+### Obowiązkowy rdzeń frontendu (zasady projektu, s. 18-20)
+
+Phoenix dopuszczono za zgodą Pani prowadzącej.
+Kryteria z załączonych zasad odnosimy do odpowiedzialności elementów, niekoniecznie do nazw klas Angulara.
+Szczegóły porównania i ograniczenia są w [05-architecture.md](05-architecture.md).
+
+| Zasady projektu | Stan w projekcie i miejsce w kodzie |
+| --------------- | ----------------------------------- |
+| Framework + TypeScript | **zrealizowane**: Phoenix 1.8 i LiveView 1.2 obsługują katalog, a `assets/catalog.ts` typuje hook.
+    Cała własna warstwa skryptów przeglądarki, w tym Pracownia, ma źródła w `assets/js/**/*.ts`; 
+    `tsc` sprawdza te pliki, esbuild wytwarza JS. `tsconfig.json` włącza pełny `strict`;
+    modele odpowiedzi i stanu są jawne, a granice odczytu katalogu, tożsamości, uprawnień i historii 
+    sprawdzają kształt JSON'a. Część pozostałych odpowiedzi API jest typowana bez osobnego dekodera w runtime. |
+| Architektura | **częściowo**: funkcje HEEx `Layouts`, `PageHTML`, `PublicComponents`, `IdentityHTML`,
+    `ProjectHTML` oddzielają kompozycję i prezentację od stanu `DiscoverLive`;
+    obszary pracowni są w `studio-{projects,resources,grants,profile,keys,read}.ts`,
+    a `studio-state.ts` określa współdzielone typy. 
+    `studio.ts` nadal koordynuje nawigację, odczyt i zapis w jednym module. |
+| Routing | **zrealizowane**: `Router`, `DiscoverLive.handle_params/3`, parametry `view` i bezpośrednie wejścia;
+    `/studio` synchronizuje URL przez History API.
+    Dostęp do edycji ostatecznie weryfikuje API zamiast nawigacja. |
+| Formularze | **zrealizowane**: `/join` oraz tworzenie/edycja projektów i profilu mają pola wymagane,
+    kontrolę danych w JS, błędy przy użytkowniku i walidację po stronie serwera.
+    Nie ma Angular Forms, lecz odpowiedzialność procesu tworzenia i walidacji jest pokryta. |
+| API | **zrealizowane funkcjonalnie**: `assets/js/lib/api.ts` oddziela sieć, timeouty i mapowanie błędów;
+    `models.ts` typuje projekcje i sprawdza kształt czterech odpowiedzi odczytu.
+    Przeglądarka czyta zasoby przez `GET`, a tworzy, zmienia i usuwa projekty lub 
+    zasoby podpisanymi zdarzeniami `POST /api/events`.
+    **Ograniczenie**: to nie są osobne metody REST `POST/PATCH/DELETE` na `projects/:id`;
+    szczegóły w [04-api.md](04-api.md). |
+| Stan | **zrealizowane z ograniczeniem**: lokalny zaszyfrowany skarbiec i szkice,
+    stan współdzielony w obrębie modułów Pracowni, dane i uprawnienia odczytywane z serwera;
+    po zapisie odświeżana jest projekcja. Szkice nie są trwałym trybem offline. |
+| UI | **zrealizowana**: wspólne komponenty i CSS, polskie komunikaty sukcesu/błędu/ostrzeżenia,
+    semantyczne HTML, etykiety, stany puste i fokus. Nie potwiedzamy pełnego audytu dostępności. |
 
 ## Poza zakresem MVP
 

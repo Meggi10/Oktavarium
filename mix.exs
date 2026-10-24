@@ -34,7 +34,7 @@ defmodule Oktavarium.MixProject do
       {:ecto_sql, "~> 3.13"},
       {:ecto_sqlite3, ">= 0.0.0"},
       {:jason, "~> 1.2"},
-      {:bandit, "~> 1.5"},
+      {:bandit, "~> 1.13.1"},
       {:phoenix, "~> 1.8.15"},
       {:phoenix_ecto, "~> 4.5"},
       {:phoenix_live_view, "~> 1.2.0"},
@@ -47,7 +47,16 @@ defmodule Oktavarium.MixProject do
       setup: ["deps.get", "ecto.setup"],
       "ecto.setup": ["ecto.create", "ecto.migrate"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      precommit: [
+        "compile --warnings-as-errors",
+        "format --check-formatted",
+        "cmd npm run typecheck",
+        "cmd npm run lint",
+        "cmd npm run build",
+        "cmd node --test test/js/*_test.mjs",
+        "test"
+      ]
     ]
   end
 end

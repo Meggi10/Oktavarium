@@ -8,6 +8,16 @@ const response = (body) => new Response(JSON.stringify(body), {
   status: 200,
   headers: { "content-type": "application/json" },
 });
+const identityDetails = {
+  id, handle: null, kind: "person", visibility: "public",
+  profile: {}, profile_refs: {}, avatar_url: null, founding_key: id,
+  auth_keys: [], members: [], grants: [], resources: [], projects: [],
+  site_url: null, integrity: "ok", head: { seq: 0, id },
+};
+const accessSnapshot = {
+  identity: id, key: id, signing_key: false, founder: false,
+  grants: [], checked_at: "2026-10-24T00:00:00Z",
+};
 
 test("public requests respect their own timeouts rather than always waiting 30 seconds", async (t) => {
   const seen = [];
@@ -18,7 +28,7 @@ test("public requests respect their own timeouts rather than always waiting 30 s
   });
   t.mock.method(globalThis, "fetch", async (path) => {
     if (path === "/api/identities") return response({ identities: [] });
-    return response({ signing_key: false, grants: [] });
+    return response(path.includes("/access/") ? accessSnapshot : identityDetails);
   });
   assert.deepEqual(await api.identities(), []);
   await api.identity(id);

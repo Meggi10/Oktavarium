@@ -3,17 +3,16 @@ import Config
 config :oktavarium,
   ecto_repos: [Oktavarium.Repo]
 
-config :oktavarium,
+config :oktavarium, Oktavarium.Repo,
   # Dopisywanie do logu czyta stan i potem zapisuje; `BEGIN IMMEDIATE` zajmuje
   # blokadę zapisu od początku, więc dwa równoległe zapisy się kolejkują zamiast
   # kończyć błędem "database is locked" przy awansie blokady.
-  default_transaction_mode: :immediate,
-  migration_primary_key: [name: :id, type: :string],
-  migration_timestamps: [type: :utc_datetime]
+  default_transaction_mode: :immediate
 
 config :oktavarium, OktavariumWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   url: [host: "localhost"],
+  live_view: [signing_salt: "oktavarium-public-live-v1"],
   render_errors: [
     formats: [html: OktavariumWeb.ErrorHTML, json: OktavariumWeb.ErrorJSON],
     layout: false
