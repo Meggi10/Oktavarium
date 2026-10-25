@@ -1,9 +1,5 @@
 import { copyButton } from "./copy-id.js";
-
-// Minimalne pomocniki DOM. Cała treść trafia przez `textContent`, nigdy `innerHTML`,
-// więc dane z serwera i od innych użytkowników nie mogą wstrzyknąć znaczników.
-
-export function h(tag, attrs = {}, ...children) {
+function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v === false || v == null) continue;
@@ -22,23 +18,18 @@ export function h(tag, attrs = {}, ...children) {
   append(el, children);
   return el;
 }
-
 function append(el, children) {
   for (const c of children.flat(Infinity)) {
     if (c == null || c === false) continue;
     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
 }
-
-export function mount(root, ...children) {
+function mount(root, ...children) {
   root.replaceChildren();
   append(root, children);
 }
-
-export const $ = (sel, root = document) => root.querySelector(sel);
-
-/** Pole formularza z etykietą. */
-export function field(label, input, hint) {
+const $ = (sel, root = document) => root.querySelector(sel);
+function field(label, input, hint = null) {
   return h(
     "label",
     { class: "field" },
@@ -47,17 +38,14 @@ export function field(label, input, hint) {
     hint && h("span", { class: "hint" }, hint),
   );
 }
-
-export function notice(text, kind = "info") {
+function notice(text2, kind = "info") {
   return h(
     "p",
     { class: "notice " + kind, role: kind === "bad" ? "alert" : "status" },
-    text,
+    text2,
   );
 }
-
-/** Pobranie pliku wygenerowanego w przeglądarce. */
-export function download(name, content, type = "application/json") {
+function download(name, content, type = "application/json") {
   const blob = new Blob(
     [typeof content === "string" ? content : JSON.stringify(content, null, 2)],
     { type },
@@ -67,12 +55,10 @@ export function download(name, content, type = "application/json") {
   document.body.append(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  setTimeout(() => URL.revokeObjectURL(url), 5e3);
 }
-
-// Dialogs return consent, not a signature. Escape is always cancellation.
 let dialogSerial = 0;
-export function modal(title, build) {
+function modal(title, build) {
   const trigger = document.activeElement;
   return new Promise((resolve) => {
     const id = "dialog-title-" + ++dialogSerial;
@@ -100,7 +86,7 @@ export function modal(title, build) {
             "aria-label": "Zamknij",
             onclick: () => done(false),
           },
-          "×",
+          "\xD7",
         ),
       ),
     );
@@ -115,45 +101,43 @@ export function modal(title, build) {
     dialog.showModal();
   });
 }
-
-export const ACTION_LABELS = {
-  "identity.genesis": "Utworzenie tożsamości",
+const ACTION_LABELS = {
+  "identity.genesis": "Utworzenie to\u017Csamo\u015Bci",
   "profile.update": "Zmiana profilu",
-  "identity.visibility.set": "Zmiana obecności w katalogu",
+  "identity.visibility.set": "Zmiana obecno\u015Bci w katalogu",
   "project.create": "Utworzenie projektu",
   "project.update": "Zmiana projektu",
-  "project.delete": "Usunięcie pustego projektu",
-  "resource.put": "Publikowanie i aktualizowanie plików",
-  "resource.delete": "Usuwanie plików",
-  "resource.*": "Zarządzanie plikami (także usuwanie)",
-  "project.*": "Zarządzanie projektem",
-  "grant.create": "Nadanie dostępu",
-  "grant.revoke": "Cofnięcie dostępu",
+  "project.delete": "Usuni\u0119cie pustego projektu",
+  "resource.put": "Publikowanie i aktualizowanie plik\xF3w",
+  "resource.delete": "Usuwanie plik\xF3w",
+  "resource.*": "Zarz\u0105dzanie plikami (tak\u017Ce usuwanie)",
+  "project.*": "Zarz\u0105dzanie projektem",
+  "grant.create": "Nadanie dost\u0119pu",
+  "grant.revoke": "Cofni\u0119cie dost\u0119pu",
   "key.add": "Dopisanie klucza sygnowania",
-  "key.revoke": "Cofnięcie klucza sygnowania",
+  "key.revoke": "Cofni\u0119cie klucza sygnowania",
   "auth_key.add": "Dopisanie klucza autoryzacji",
-  "auth_key.revoke": "Cofnięcie klucza autoryzacji",
-  "*": "Wszystkie działania w zakresie",
+  "auth_key.revoke": "Cofni\u0119cie klucza autoryzacji",
+  "*": "Wszystkie dzia\u0142ania w zakresie",
 };
 const fieldNames = {
-  display_name: "Nazwa wyświetlana",
+  display_name: "Nazwa wy\u015Bwietlana",
   bio: "Opis",
   location: "Miejsce",
   website: "Strona",
-  title: "Tytuł",
+  title: "Tytu\u0142",
   description: "Opis",
   alt: "Tekst alternatywny",
   collection: "Kolekcja",
 };
-export const actionLabel = (type) => ACTION_LABELS[type] || type;
+const actionLabel = (type) => ACTION_LABELS[type] || type;
 const text = (v) =>
   v == null || v === ""
     ? "(brak)"
     : typeof v === "object"
       ? JSON.stringify(v)
       : String(v);
-
-export function changeSummary(type, body, context = {}) {
+function changeSummary(type, body, context = {}) {
   const d = context.data,
     project = d?.projects?.find((p) => p.id === (body.project_id || body.id));
   const file = d?.resources?.find((r) => r.id === body.id);
@@ -162,7 +146,7 @@ export function changeSummary(type, body, context = {}) {
     for (const [key, value] of Object.entries(body.fields))
       rows.push([
         fieldNames[key] || key,
-        text(d?.profile?.[key]) + " → " + text(value),
+        text(d?.profile?.[key]) + " \u2192 " + text(value),
       ]);
   if (body.meta)
     for (const [key, value] of Object.entries(body.meta))
@@ -178,7 +162,7 @@ export function changeSummary(type, body, context = {}) {
         : "Widoczna w katalogu",
     ]);
   if (body.slug) rows.push(["Adres / slug", body.slug]);
-  if (body.path || file) rows.push(["Plik", body.path || file.path]);
+  if (body.path || file) rows.push(["Plik", body.path || file?.path || ""]);
   if (type.startsWith("resource.")) {
     const targetId = Object.hasOwn(body, "project_id")
       ? body.project_id
@@ -186,11 +170,13 @@ export function changeSummary(type, body, context = {}) {
     const target = d?.projects?.find((p) => p.id === targetId);
     rows.push([
       type === "resource.delete" ? "Miejsce usuwanego pliku" : "Cel",
-      target ? target.meta.title || target.slug : "Przestrzeń główna",
+      target
+        ? target.meta.title || target.slug
+        : "Przestrze\u0144 g\u0142\xF3wna",
     ]);
     if (file)
       rows.push([
-        "Istniejący zasób",
+        "Istniej\u0105cy zas\xF3b",
         file.id + " (ID pozostaje przy aktualizacji)",
       ]);
     if (
@@ -199,27 +185,29 @@ export function changeSummary(type, body, context = {}) {
         (Object.hasOwn(body, "project_id") &&
           body.project_id !== file.project_id))
     ) {
-      const from = d.projects.find((p) => p.id === file.project_id);
+      const from = d?.projects?.find((p) => p.id === file.project_id);
       rows.push([
-        "Przeniesienie ze źródła",
-        (from?.meta.title || "Przestrzeń główna") + " / " + file.path,
+        "Przeniesienie ze \u017Ar\xF3d\u0142a",
+        (from?.meta.title || "Przestrze\u0144 g\u0142\xF3wna") +
+          " / " +
+          file.path,
       ]);
     }
   } else if (project)
     rows.push(["Projekt", project.meta.title || project.slug]);
   if (body.subject) rows.push(["Klucz odbiorcy", body.subject]);
-  if (body.action) rows.push(["Dostęp", actionLabel(body.action)]);
+  if (body.action) rows.push(["Dost\u0119p", actionLabel(body.action)]);
   if (body.resource) rows.push(["Zakres", body.resource]);
-  if (body.parent_grant) rows.push(["Grant nadrzędny", body.parent_grant]);
+  if (body.parent_grant) rows.push(["Grant nadrz\u0119dny", body.parent_grant]);
   if (type === "grant.create") {
     rows.push([
       "Przekazywanie dalej",
-      body.delegable ? "Tak, tylko węższy zakres" : "Nie",
+      body.delegable ? "Tak, tylko w\u0119\u017Cszy zakres" : "Nie",
     ]);
     rows.push([
       "Do kiedy",
       body.expires_at
-        ? new Date(body.expires_at * 1000).toLocaleString("pl-PL")
+        ? new Date(body.expires_at * 1e3).toLocaleString("pl-PL")
         : "Bez terminu",
     ]);
   }
@@ -228,7 +216,7 @@ export function changeSummary(type, body, context = {}) {
   if (body.hash) rows.push(["SHA-256 pliku", body.hash]);
   return rows;
 }
-export function confirmSign({ type, body, signer, identity, context = {} }) {
+function confirmSign({ type, body, signer, identity, context = {} }) {
   const removal = type.endsWith(".delete") || type.endsWith(".revoke");
   const moving =
     type === "resource.put" &&
@@ -241,14 +229,14 @@ export function confirmSign({ type, body, signer, identity, context = {} }) {
   const verb =
     type === "resource.put"
       ? moving
-        ? "Podpisz i przenieś"
+        ? "Podpisz i przenie\u015B"
         : "Podpisz i opublikuj"
       : type === "grant.revoke"
-        ? "Podpisz i cofnij dostęp"
+        ? "Podpisz i cofnij dost\u0119p"
         : removal
-          ? "Podpisz usunięcie"
+          ? "Podpisz usuni\u0119cie"
           : "Podpisz i zapisz";
-  return modal("Sprawdź zmianę przed podpisem", (box, done) => {
+  return modal("Sprawd\u017A zmian\u0119 przed podpisem", (box, done) => {
     append(box, [
       h("p", { class: "eyebrow" }, actionLabel(type)),
       h(
@@ -256,13 +244,16 @@ export function confirmSign({ type, body, signer, identity, context = {} }) {
         { class: "sign-meta" },
         ...[
           [
-            "Tożsamość",
+            "To\u017Csamo\u015B\u0107",
             context.data?.profile?.display_name ||
               context.data?.handle ||
               identity ||
-              "Nowa tożsamość",
+              "Nowa to\u017Csamo\u015B\u0107",
           ],
-          ["Podpisujący klucz", (signer.label || "Klucz") + " · " + signer.id],
+          [
+            "Podpisuj\u0105cy klucz",
+            (signer.label || "Klucz") + " \xB7 " + signer.id,
+          ],
           ...changeSummary(type, body, context),
         ].map(([label, value]) =>
           h(
@@ -285,31 +276,31 @@ export function confirmSign({ type, body, signer, identity, context = {} }) {
         h(
           "p",
           { class: "notice warn" },
-          "Aktualizacja może zastąpić istniejący plik. Bajty są wysyłane po tej zgodzie; publikację potwierdza dopiero przyjęcie zdarzenia.",
+          "Aktualizacja mo\u017Ce zast\u0105pi\u0107 istniej\u0105cy plik. Bajty s\u0105 wysy\u0142ane po tej zgodzie; publikacj\u0119 potwierdza dopiero przyj\u0119cie zdarzenia.",
         ),
       type === "grant.create" &&
         body.action.includes("put") &&
         h(
           "p",
           { class: "notice warn" },
-          "Publikowanie obejmuje także aktualizację cudzych plików w tym zakresie. Nie jest to wyłącznie dodawanie nowych.",
+          "Publikowanie obejmuje tak\u017Ce aktualizacj\u0119 cudzych plik\xF3w w tym zakresie. Nie jest to wy\u0142\u0105cznie dodawanie nowych.",
         ),
       removal &&
         h(
           "p",
           { class: "notice warn" },
           type === "grant.revoke"
-            ? "Potomkowie utracą podstawę tej delegacji. Odczyt i dotychczasowe materiały pozostają dostępne."
-            : "To nie jest fizyczne wymazanie historii ani bajtów ze wszystkich kopii.",
+            ? "Potomkowie utrac\u0105 podstaw\u0119 tej delegacji. Odczyt i dotychczasowe materia\u0142y pozostaj\u0105 dost\u0119pne."
+            : "To nie jest fizyczne wymazanie historii ani bajt\xF3w ze wszystkich kopii.",
         ),
       h(
         "details",
         {},
-        h("summary", {}, "Szczegóły techniczne"),
+        h("summary", {}, "Szczeg\xF3\u0142y techniczne"),
         h(
           "p",
           { class: "hint" },
-          "Zamiar operacji przed zamianą tekstów na referencje SHA-256. To nie jest jeszcze podpisana koperta.",
+          "Zamiar operacji przed zamian\u0105 tekst\xF3w na referencje SHA-256. To nie jest jeszcze podpisana koperta.",
         ),
         h(
           "pre",
@@ -320,7 +311,7 @@ export function confirmSign({ type, body, signer, identity, context = {} }) {
       h(
         "p",
         { class: "hint" },
-        "Historia operacji pozostaje publiczna. Treści profilu i metadanych są powiązane ze skrótami; odczyt nie wymaga kluczy.",
+        "Historia operacji pozostaje publiczna. Tre\u015Bci profilu i metadanych s\u0105 powi\u0105zane ze skr\xF3tami; odczyt nie wymaga kluczy.",
       ),
       h(
         "div",
@@ -343,14 +334,13 @@ export function confirmSign({ type, body, signer, identity, context = {} }) {
             class: "btn",
             onclick: () => done(false),
           },
-          "Wróć do szkicu",
+          "Wr\xF3\u0107 do szkicu",
         ),
       ),
     ]);
   });
 }
-
-export function ask(title, message, label = "Potwierdź") {
+function ask(title, message, label = "Potwierd\u017A") {
   return modal(title, (box, done) =>
     box.append(
       h("p", {}, message),
@@ -371,3 +361,17 @@ export function ask(title, message, label = "Potwierdź") {
     ),
   );
 }
+export {
+  $,
+  ACTION_LABELS,
+  actionLabel,
+  ask,
+  changeSummary,
+  confirmSign,
+  download,
+  field,
+  h,
+  modal,
+  mount,
+  notice,
+};

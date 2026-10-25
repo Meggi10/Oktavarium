@@ -1,9 +1,5 @@
-// Koperta v2: podpisujemy referencje SHA-256, nie tekst profilu i opisów.
-// Tekst jedzie obok jako attachments; serwer weryfikuje jego skrót, po czym
-// zapisuje go oddzielnie. Replikacja podpisanego dziennika nie zawiera tekstu.
 import { b64u, enc, hex } from "./bytes.js";
 import { sign, eventId, sha256 } from "./crypto.js";
-
 async function detach(type, original) {
   const name =
     type === "profile.update"
@@ -11,7 +7,6 @@ async function detach(type, original) {
       : ["resource.put", "project.create", "project.update"].includes(type)
         ? "meta"
         : null;
-
   if (
     !name ||
     !original ||
@@ -21,7 +16,6 @@ async function detach(type, original) {
   ) {
     return { body: original, attachments: {} };
   }
-
   const refs = {};
   const attachments = {};
   for (const [field, value] of Object.entries(original[name])) {
@@ -35,9 +29,7 @@ async function detach(type, original) {
   }
   return { body: { ...original, [name]: refs }, attachments };
 }
-
-/** `{signer, identity, seq, prev, type, body, ts?}` -> `{envelope, id}`. */
-export async function buildEnvelope({
+async function buildEnvelope({
   signer,
   identity = null,
   seq,
@@ -56,10 +48,9 @@ export async function buildEnvelope({
       prev,
       type,
       body: detached.body,
-      ts: ts ?? Math.floor(Date.now() / 1000),
+      ts: ts ?? Math.floor(Date.now() / 1e3),
     }),
   );
-
   const signature = await sign("event", payload, signer.private);
   return {
     id: await eventId(payload),
@@ -73,3 +64,4 @@ export async function buildEnvelope({
     },
   };
 }
+export { buildEnvelope };

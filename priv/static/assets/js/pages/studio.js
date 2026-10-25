@@ -1,44 +1,29 @@
-// C2: public workspace, local keys and signed mutations are separate concerns.
-import { generateKey, sign, sha256 } from "../lib/crypto.js";
-import { short, enc, unb64u, dec } from "../lib/bytes.js";
-import { cliKeyfile } from "../lib/keystore.js";
+import { failure } from "../lib/failure.js";
+import { sign, sha256 } from "../lib/crypto.js";
+import { short, enc } from "../lib/bytes.js";
 import { localVault, rememberVault, lockVault } from "../lib/local-state.js";
 import { unlockDialog } from "../lib/vault-ui.js";
 import { Drafts } from "../lib/drafts.js";
 import * as api from "../lib/api.js";
-import {
-  h,
-  mount,
-  field,
-  notice,
-  download,
-  confirmSign,
-  ask,
-  actionLabel,
-} from "../lib/ui.js";
+import { h, mount, field, notice, confirmSign, ask } from "../lib/ui.js";
 import { permits, fileResource } from "../lib/permissions.js";
 import { copyButton } from "../lib/copy-id.js";
 import { projectsSection } from "./studio-projects.js";
 import { resourcesSection, validateFile } from "./studio-resources.js";
-import { AVATAR_PATH, avatarMediaType } from "../lib/avatar.js";
 import { grantsSection } from "./studio-grants.js";
-
+import { createProfileSections } from "./studio-profile.js";
+import { createKeySections } from "./studio-keys.js";
+import { createReadSections } from "./studio-read.js";
 const root = document.getElementById("app");
 const views = {
-  overview: "Przegląd",
+  overview: "Przegl\u0105d",
   profile: "Profil",
   projects: "Projekty",
   resources: "Zasoby",
-  collaboration: "Współpraca",
+  collaboration: "Wsp\xF3\u0142praca",
   keys: "Klucze",
   history: "Historia",
 };
-const PROFILE_FIELDS = [
-  ["display_name", "Nazwa wyświetlana", "input"],
-  ["bio", "Opis", "textarea"],
-  ["location", "Miejsce", "input"],
-  ["website", "Strona (https://...)", "input"],
-];
 const state = {
   vault: null,
   signerId: null,
@@ -57,15 +42,16 @@ const state = {
   directoryError: null,
 };
 const drafts = new Drafts(),
-  dirty = new Set(),
-  bases = new Map();
-const uploaded = new Set(); // Hashes acknowledged by this server in this tab.
-let startPromise,
+  dirty = /* @__PURE__ */ new Set(),
+  bases = /* @__PURE__ */ new Map();
+const uploaded = /* @__PURE__ */ new Set();
+let startPromise = null,
   ticket = 0;
 const draftKey = () => [state.current, state.view, state.projectId].join(":");
 const content = () => document.getElementById("studio-content");
 function capture() {
-  if (content() && dirty.has(draftKey())) drafts.capture(draftKey(), content());
+  const target = content();
+  if (target && dirty.has(draftKey())) drafts.capture(draftKey(), target);
 }
 const can = (action, resource) =>
   state.data?.integrity !== "error" &&
@@ -75,7 +61,14 @@ const can = (action, resource) =>
 const label = (d) =>
   d?.profile?.display_name ||
   d?.display_name ||
-  (d?.handle ? "@" + d.handle : d?.id ? short(d.id) : "Wybierz tożsamość");
+  (d?.handle
+    ? "@" + d.handle
+    : d?.id
+      ? short(d.id)
+      : "Wybierz to\u017Csamo\u015B\u0107");
+const { profileSection, avatarSection, visibilitySection } =
+  createProfileSections({ can, act, publishFile, say, label });
+const { keysSection, backupSection } = createKeySections({ state, act, say });
 const url = (
   view = state.view,
   project = state.projectId,
@@ -87,16 +80,27 @@ const url = (
   return "/studio?" + p;
 };
 const publicUrl = () =>
-  "/i/" + encodeURIComponent(state.data?.handle || state.current);
+  "/i/" + encodeURIComponent(state.data?.handle || state.current || "");
+const { overview, readKeys, localKeys, loadHistory, historyView } =
+  createReadSections({
+    state,
+    label,
+    go,
+    url,
+    button,
+    endSession,
+    say,
+    render,
+  });
 function parseUrl() {
   const p = new URLSearchParams(location.search);
-  state.view = Object.hasOwn(views, p.get("view")) ? p.get("view") : "overview";
+  const view = p.get("view");
+  state.view = view && Object.hasOwn(views, view) ? view : "overview";
   state.projectId =
     p.get("project") || (p.get("scope") === "root" ? null : "all");
   return p.get("ref") || state.directory[0]?.id || null;
 }
-
-export function start() {
+function start() {
   if (startPromise) return startPromise;
   document.title = "Pracownia | Oktavarium";
   document.body.dataset.workspace = "true";
@@ -105,8 +109,6 @@ export function start() {
   state.signerId = state.vault?.ofKind("signing")[0]?.id || null;
   state.authId = state.vault?.ofKind("auth")[0]?.id || null;
   const requestedRef = parseUrl();
-
-  // Render immediately: the directory and IndexedDB must never gate the UI.
   render();
   window.addEventListener("popstate", onPop);
   window.addEventListener("beforeunload", (e) => {
@@ -116,10 +118,11 @@ export function start() {
     }
   });
   root.addEventListener("input", (e) => {
+    const target = e.target;
     if (
-      !e.target.closest("#studio-content form") ||
-      e.target.type === "password" ||
-      e.target.closest("[data-local-only]")
+      !target.closest("#studio-content form") ||
+      target.type === "password" ||
+      target.closest("[data-local-only]")
     )
       return;
     const key = draftKey();
@@ -127,18 +130,14 @@ export function start() {
     if (!bases.has(key) && state.data?.head)
       bases.set(key, structuredClone(state.data.head));
   });
-
-  // A direct /studio?ref=... must work even when /api/identities is unavailable.
-  // Only public requests occur on entry. No /me, challenge or upload session.
   startPromise = (async () => {
     const catalogue = (async () => {
       try {
         const entries = await api.identities();
         if (!Array.isArray(entries))
-          throw new Error("Nieprawidłowa odpowiedź katalogu.");
+          throw new Error("Nieprawid\u0142owa odpowied\u017A katalogu.");
         state.directory = entries;
         state.directoryError = null;
-        // Do not override a manually opened identity while the catalogue was pending.
         if (!requestedRef && ticket === 0 && !state.current && entries.length)
           await select(entries[0].id, false);
         else {
@@ -146,7 +145,7 @@ export function start() {
           render();
         }
       } catch (e) {
-        state.directoryError = e.message;
+        state.directoryError = failure(e).message;
         capture();
         render();
       }
@@ -156,7 +155,9 @@ export function start() {
   })().catch((e) => {
     state.loading = false;
     state.message = {
-      text: "Nie udało się uruchomić Pracowni: " + e.message,
+      text:
+        "Nie uda\u0142o si\u0119 uruchomi\u0107 Pracowni: " +
+        failure(e).message,
       kind: "bad",
     };
     render();
@@ -194,12 +195,12 @@ async function select(id, push = true) {
     )
       state.projectId = "all";
     if (push) history.pushState(null, "", url());
-    // Show the selected identity even if the access lookup is slow.
     state.loading = false;
     render();
     await refreshAccess().catch((e) => {
       state.message = {
-        text: "Nie można odczytać uprawnień: " + e.message,
+        text:
+          "Nie mo\u017Cna odczyta\u0107 uprawnie\u0144: " + failure(e).message,
         kind: "bad",
       };
     });
@@ -211,7 +212,9 @@ async function select(id, push = true) {
     if (generation !== ticket) return;
     state.loading = false;
     state.message = {
-      text: "Nie udało się otworzyć tożsamości: " + e.message,
+      text:
+        "Nie uda\u0142o si\u0119 otworzy\u0107 to\u017Csamo\u015Bci: " +
+        failure(e).message,
       kind: "bad",
     };
     render();
@@ -235,6 +238,7 @@ async function reload({ discard = false } = {}) {
   } else capture();
   const identity = state.current,
     generation = ++ticket;
+  if (!identity) return;
   const fresh = await api.identity(identity);
   if (generation !== ticket || identity !== state.current) return;
   state.data = fresh;
@@ -246,7 +250,7 @@ async function reload({ discard = false } = {}) {
   )
     state.projectId = "all";
   await refreshAccess().catch((e) => {
-    state.message = { text: e.message, kind: "bad" };
+    state.message = { text: failure(e).message, kind: "bad" };
   });
   render();
 }
@@ -282,7 +286,7 @@ async function unlock() {
     await refreshAccess();
     render();
   } catch (e) {
-    say(e.message, "bad");
+    say(failure(e).message, "bad");
   }
 }
 function lock() {
@@ -297,20 +301,21 @@ function lock() {
 async function endSession() {
   if (state.busy) return;
   try {
-    // Explicit session management, never part of ordinary reading.
     if (!state.me) {
       const session = await api.me();
       api.setCsrf(session.csrf);
     }
     await api.logout();
     state.me = null;
-    say("Sesja przesyłania zakończona. Klucze pozostają niezależne.");
+    say(
+      "Sesja przesy\u0142ania zako\u0144czona. Klucze pozostaj\u0105 niezale\u017Cne.",
+    );
   } catch (e) {
-    if (e.status === 401) {
+    if (failure(e).status === 401) {
       state.me = null;
       api.setCsrf(null);
-      say("Nie ma aktywnej sesji przesyłania.");
-    } else say(e.message, "bad");
+      say("Nie ma aktywnej sesji przesy\u0142ania.");
+    } else say(failure(e).message, "bad");
   }
 }
 function button(text, fn, cls = "") {
@@ -320,7 +325,8 @@ function button(text, fn, cls = "") {
       type: "button",
       class: "btn " + cls,
       disabled: state.busy,
-      onclick: () => Promise.resolve(fn()).catch((e) => say(e.message, "bad")),
+      onclick: () =>
+        Promise.resolve(fn()).catch((e) => say(failure(e).message, "bad")),
     },
     text,
   );
@@ -358,7 +364,7 @@ function render() {
       id: "identity",
       disabled: state.busy,
       onchange: (e) =>
-        select(e.target.value).catch((err) => say(err.message, "bad")),
+        select(e.target.value).catch((err) => say(failure(err).message, "bad")),
     },
     available.size
       ? [...available.values()].map((i) =>
@@ -368,11 +374,11 @@ function render() {
             label(i),
           ),
         )
-      : h("option", { value: "" }, "Brak tożsamości"),
+      : h("option", { value: "" }, "Brak to\u017Csamo\u015Bci"),
   );
   const ref = h("input", {
     id: "studio-ref",
-    placeholder: "@uchwyt lub pełne ID",
+    placeholder: "@uchwyt lub pe\u0142ne ID",
     autocomplete: "off",
   });
   const browse = h(
@@ -382,22 +388,27 @@ function render() {
       onsubmit: (e) => {
         e.preventDefault();
         select(ref.value.trim().replace(/^@/, "")).catch((err) =>
-          say(err.message, "bad"),
+          say(failure(err).message, "bad"),
         );
       },
     },
-    field("Otwórz przez adres", ref),
+    field("Otw\xF3rz przez adres", ref),
     h(
       "button",
       { type: "submit", class: "btn", disabled: state.busy },
-      "Otwórz",
+      "Otw\xF3rz",
     ),
   );
   const sidebar = h(
     "aside",
     { class: "studio-sidebar" },
-    field("Przeglądana tożsamość", identitySelect),
-    h("details", {}, h("summary", {}, "Tożsamość spoza katalogu"), browse),
+    field("Przegl\u0105dana to\u017Csamo\u015B\u0107", identitySelect),
+    h(
+      "details",
+      {},
+      h("summary", {}, "To\u017Csamo\u015B\u0107 spoza katalogu"),
+      browse,
+    ),
     h("div", { class: "desktop-studio-nav" }, nav()),
     h(
       "details",
@@ -408,7 +419,7 @@ function render() {
     h(
       "p",
       { class: "hint" },
-      "Wybór tożsamości nie zmienia klucza. Odczyt jest otwarty.",
+      "Wyb\xF3r to\u017Csamo\u015Bci nie zmienia klucza. Odczyt jest otwarty.",
     ),
   );
   const scope = h(
@@ -421,12 +432,12 @@ function render() {
     h(
       "option",
       { value: "all", selected: state.projectId === "all" },
-      "Cała tożsamość",
+      "Ca\u0142a to\u017Csamo\u015B\u0107",
     ),
     h(
       "option",
       { value: "", selected: state.projectId === null },
-      "Przestrzeń główna (bez projektu)",
+      "Przestrze\u0144 g\u0142\xF3wna (bez projektu)",
     ),
     (d?.projects || []).map((p) =>
       h(
@@ -450,7 +461,7 @@ function render() {
             await refreshAccess();
             render();
           } catch (err) {
-            say(err.message, "bad");
+            say(failure(err).message, "bad");
           }
         },
       },
@@ -465,7 +476,7 @@ function render() {
           h(
             "option",
             { value: k.id, selected: k.id === state.signerId },
-            (k.label || "Klucz") + " · " + short(k.id),
+            (k.label || "Klucz") + " \xB7 " + short(k.id),
           ),
         ),
     );
@@ -475,10 +486,10 @@ function render() {
       (state.access?.signing_key &&
         (state.access.founder || state.access.grants.length > 0)));
   const accessText = !state.vault
-    ? "Tryb odczytu. Do przeglądania nie potrzebujesz kluczy ani sesji."
+    ? "Tryb odczytu. Do przegl\u0105dania nie potrzebujesz kluczy ani sesji."
     : active
-      ? "Klucz odblokowany. Dostępne działania zależą od jego uprawnień."
-      : "Klucz odblokowany, brak uprawnień w tej tożsamości. Odczyt pozostaje dostępny.";
+      ? "Klucz odblokowany. Dost\u0119pne dzia\u0142ania zale\u017C\u0105 od jego uprawnie\u0144."
+      : "Klucz odblokowany, brak uprawnie\u0144 w tej to\u017Csamo\u015Bci. Odczyt pozostaje dost\u0119pny.";
   mount(
     root,
     h(
@@ -497,7 +508,9 @@ function render() {
             h(
               "p",
               { class: "eyebrow" },
-              d?.kind === "collective" ? "Kolektyw" : "Tożsamość",
+              d?.kind === "collective"
+                ? "Kolektyw"
+                : "To\u017Csamo\u015B\u0107",
             ),
             h(
               "div",
@@ -529,7 +542,7 @@ function render() {
         h(
           "div",
           { class: "studio-controls" },
-          d && field("Zakres zasobów", scope),
+          d && field("Zakres zasob\xF3w", scope),
           signer && field("Aktywny klucz", signer),
         ),
         ["profile", "keys"].includes(state.view) &&
@@ -537,23 +550,23 @@ function render() {
           h(
             "p",
             { class: "hint" },
-            "Ta sekcja dotyczy tożsamości, nie projektu. Zakres zasobów zostaje zapamiętany.",
+            "Ta sekcja dotyczy to\u017Csamo\u015Bci, nie projektu. Zakres zasob\xF3w zostaje zapami\u0119tany.",
           ),
         notice(accessText),
         state.directoryError &&
           notice(
-            "Katalog jest chwilowo niedostępny: " +
+            "Katalog jest chwilowo niedost\u0119pny: " +
               state.directoryError +
-              ". Możesz otworzyć tożsamość po uchwycie lub ID.",
+              ". Mo\u017Cesz otworzy\u0107 to\u017Csamo\u015B\u0107 po uchwycie lub ID.",
             "warn",
           ),
         d?.visibility === "unlisted" &&
           notice(
-            "Nieindeksowana: poza katalogiem, ale wszystkie dane są odczytywalne przez adres.",
+            "Nieindeksowana: poza katalogiem, ale wszystkie dane s\u0105 odczytywalne przez adres.",
           ),
         d?.integrity === "error" &&
           notice(
-            "Nie udało się zweryfikować dziennika. Zapis jest wstrzymany; możesz przeglądać dane i historię.",
+            "Nie uda\u0142o si\u0119 zweryfikowa\u0107 dziennika. Zapis jest wstrzymany; mo\u017Cesz przegl\u0105da\u0107 dane i histori\u0119.",
             "bad",
           ),
         h(
@@ -574,24 +587,33 @@ function render() {
                 h(
                   "h2",
                   {},
-                  state.loading ? "Odczyt tożsamości…" : "Wybierz przestrzeń",
+                  state.loading
+                    ? "Odczyt to\u017Csamo\u015Bci\u2026"
+                    : "Wybierz przestrze\u0144",
                 ),
                 h(
                   "p",
                   { role: "status" },
                   state.loading
-                    ? "Pobieramy dane publiczne. Jeśli serwer nie odpowie, zobaczysz błąd i możesz spróbować ponownie."
-                    : "Otwórz tożsamość przez adres albo utwórz pierwszą.",
+                    ? "Pobieramy dane publiczne. Je\u015Bli serwer nie odpowie, zobaczysz b\u0142\u0105d i mo\u017Cesz spr\xF3bowa\u0107 ponownie."
+                    : "Otw\xF3rz to\u017Csamo\u015B\u0107 przez adres albo utw\xF3rz pierwsz\u0105.",
                 ),
                 state.message?.kind === "bad" &&
-                  button("Spróbuj ponownie", () => select(parseUrl(), false)),
-                h("a", { class: "btn", href: "/join" }, "Nowa tożsamość"),
+                  button("Spr\xF3buj ponownie", () =>
+                    select(parseUrl(), false),
+                  ),
+                h(
+                  "a",
+                  { class: "btn", href: "/join" },
+                  "Nowa to\u017Csamo\u015B\u0107",
+                ),
               ),
         ),
       ),
     ),
   );
-  drafts.restore(draftKey(), content());
+  const target = content();
+  if (target) drafts.restore(draftKey(), target);
   if (state.view === "history" && d && !state.events) loadHistory();
 }
 function viewContent(d) {
@@ -612,7 +634,7 @@ function viewContent(d) {
                 h("img", {
                   class: "avatar avatar-large avatar-photo",
                   src: d.avatar_url,
-                  alt: "Zdjęcie profilowe",
+                  alt: "Zdj\u0119cie profilowe",
                 }),
               h("p", {}, d.profile.bio || "Brak opisu."),
               h("p", {}, d.profile.location || ""),
@@ -621,7 +643,7 @@ function viewContent(d) {
         editable
           ? visibilitySection(d)
           : notice(
-              "Obecność w katalogu: " +
+              "Obecno\u015B\u0107 w katalogu: " +
                 (d.visibility === "public" ? "widoczna" : "nieindeksowana"),
             ),
       );
@@ -667,210 +689,6 @@ function viewContent(d) {
       return overview(d);
   }
 }
-function overview(d) {
-  const project = d.projects.find((p) => p.id === state.projectId);
-  const files = d.resources.filter(
-    (r) =>
-      state.projectId === "all" || (r.project_id || null) === state.projectId,
-  );
-  return h(
-    "div",
-    { class: "stack" },
-    h(
-      "section",
-      { class: "panel" },
-      h("p", { class: "eyebrow" }, project ? "Projekt" : "Przestrzeń"),
-      h("h2", {}, project?.meta.title || label(d)),
-      h(
-        "p",
-        {},
-        project?.meta.description || d.profile.bio || "Nie ma jeszcze opisu.",
-      ),
-      h(
-        "div",
-        { class: "quick-summary" },
-        h("span", {}, d.projects.length, " projektów"),
-        h("span", {}, files.length, " plików"),
-        h("span", {}, "Dziennik #", d.head.seq),
-      ),
-      h(
-        "div",
-        { class: "actions" },
-        button("Przeglądaj zasoby", () => go("resources")),
-        button("Sprawdź dostęp", () => go("collaboration")),
-        h(
-          "a",
-          { class: "btn", href: "/join?kind=collective" },
-          "Nowy kolektyw",
-        ),
-      ),
-    ),
-    h(
-      "div",
-      { class: "project-grid" },
-      d.projects.map((p) =>
-        h(
-          "a",
-          {
-            class: "project-card",
-            href: url("resources", p.id),
-            onclick: (e) => {
-              e.preventDefault();
-              go("resources", p.id);
-            },
-          },
-          h("p", { class: "eyebrow" }, "Projekt"),
-          h("h2", {}, p.meta.title || p.slug),
-          h("p", {}, p.meta.description || "Brak opisu."),
-          h(
-            "span",
-            { class: "hint" },
-            d.resources.filter((r) => r.project_id === p.id).length,
-            " plików",
-          ),
-        ),
-      ),
-    ),
-    !d.projects.length &&
-      h(
-        "div",
-        { class: "feed-empty" },
-        h("h2", {}, "Nie ma jeszcze projektów"),
-        button("Przejdź do projektów", () => go("projects")),
-      ),
-  );
-}
-function readKeys(d) {
-  return h(
-    "section",
-    { class: "panel" },
-    h("h2", {}, "Klucze publiczne"),
-    h("p", {}, "Założycielski: ", copyButton(d.founding_key)),
-    h("h3", {}, "Sygnowanie"),
-    h(
-      "ul",
-      { class: "res-list" },
-      d.members.map((k) => h("li", {}, copyButton(k.key_id), " · ", k.status)),
-    ),
-    h("h3", {}, "Autoryzacja przesyłania"),
-    h(
-      "ul",
-      { class: "res-list" },
-      d.auth_keys.map((k) =>
-        h("li", {}, copyButton(k.key_id), " · ", k.status),
-      ),
-    ),
-  );
-}
-function localKeys() {
-  return h(
-    "section",
-    { class: "panel local-vault", "data-local-only": "true" },
-    h("h2", {}, "Lokalny skarbiec i sesja"),
-    h(
-      "p",
-      {},
-      "Klucze prywatne są lokalne. Nie należą do publicznych danych platformy.",
-    ),
-    state.vault &&
-      field(
-        "Klucz autoryzacji uploadu",
-        h(
-          "select",
-          {
-            id: "upload-auth",
-            onchange: (e) => {
-              state.authId = e.target.value;
-            },
-          },
-          h("option", { value: "" }, "Wybierz klucz"),
-          state.vault
-            .ofKind("auth")
-            .map((k) =>
-              h(
-                "option",
-                { value: k.id, selected: k.id === state.authId },
-                k.label || short(k.id),
-              ),
-            ),
-        ),
-      ),
-    h(
-      "p",
-      { class: "hint" },
-      state.me
-        ? "Sesja przesyłania aktywna w tej karcie."
-        : "Nie sprawdzamy sesji przy odczycie. Zostanie sprawdzona dopiero przed uploadem.",
-    ),
-    button("Zakończ sesję przesyłania", endSession),
-    h(
-      "a",
-      { class: "btn", href: "/login?restore=1" },
-      "Przywróć kopię skarbca",
-    ),
-  );
-}
-async function loadHistory() {
-  const id = state.current;
-  try {
-    const result = await api.api(
-      "GET",
-      `/api/identities/${encodeURIComponent(id)}/events`,
-    );
-    if (id !== state.current) return;
-    state.events = result.events;
-    if (state.view === "history") render();
-  } catch (e) {
-    say(e.message, "bad");
-  }
-}
-function historyView(d) {
-  return h(
-    "section",
-    { class: "panel" },
-    h(
-      "p",
-      { class: "hint" },
-      "Ocena serwera: " +
-        (d.integrity === "ok"
-          ? "podpisy i łańcuch zweryfikowane"
-          : "niepotwierdzona integralność") +
-        ". Brak bajtów historycznej treści nie oznacza uszkodzenia podpisu.",
-    ),
-    state.events
-      ? h(
-          "ol",
-          { class: "history-list" },
-          [...state.events].reverse().map((envelope) => {
-            try {
-              const e = JSON.parse(dec.decode(unb64u(envelope.payload)));
-              return h(
-                "li",
-                {},
-                h("h3", {}, "#" + e.seq + " · " + actionLabel(e.type)),
-                h(
-                  "p",
-                  { class: "hint" },
-                  new Date(e.ts * 1000).toLocaleString("pl-PL"),
-                  " · klucz ",
-                  copyButton(e.signer),
-                ),
-                h(
-                  "details",
-                  {},
-                  h("summary", {}, "Podpisana operacja"),
-                  h("pre", { class: "code" }, JSON.stringify(e, null, 2)),
-                ),
-              );
-            } catch {
-              return h("li", {}, notice("Nie można odczytać koperty.", "bad"));
-            }
-          }),
-        )
-      : h("p", {}, "Odczyt dziennika…"),
-  );
-}
-
 function pendingPanel() {
   const p = api.pendingFor(state.current);
   if (!p) return null;
@@ -885,12 +703,12 @@ function pendingPanel() {
       } else
         info.replaceChildren(
           notice(
-            "Nie znaleziono jeszcze tej próby. To nie dowodzi, że pierwotne żądanie nie dotrze. Możesz ponowić dokładnie tę samą kopertę.",
+            "Nie znaleziono jeszcze tej pr\xF3by. To nie dowodzi, \u017Ce pierwotne \u017C\u0105danie nie dotrze. Mo\u017Cesz ponowi\u0107 dok\u0142adnie t\u0119 sam\u0105 kopert\u0119.",
             "warn",
           ),
         );
     } catch (e) {
-      info.replaceChildren(notice(e.message, "bad"));
+      info.replaceChildren(notice(failure(e).message, "bad"));
     }
   };
   return h(
@@ -900,16 +718,16 @@ function pendingPanel() {
     h(
       "p",
       {},
-      "Nie podpisuj kolejnej wersji. Sprawdź zdarzenie ",
+      "Nie podpisuj kolejnej wersji. Sprawd\u017A zdarzenie ",
       copyButton(p.id),
     ),
     info,
-    button("Sprawdź zapis w dzienniku", check),
-    button("Ponów tę samą kopertę", async () => {
+    button("Sprawd\u017A zapis w dzienniku", check),
+    button("Pon\xF3w t\u0119 sam\u0105 kopert\u0119", async () => {
       if (
         !(await ask(
-          "Ponowić przesłanie?",
-          "Wyślemy identyczne ID, treść i podpis. Nie powstanie nowy podpis.",
+          "Ponowi\u0107 przes\u0142anie?",
+          "Wy\u015Blemy identyczne ID, tre\u015B\u0107 i podpis. Nie powstanie nowy podpis.",
         ))
       )
         return;
@@ -919,35 +737,42 @@ function pendingPanel() {
         say("Zapis potwierdzony.", "ok");
         await reload({ discard: true });
       } catch (e) {
-        info.replaceChildren(notice(e.message, "bad"));
+        info.replaceChildren(notice(failure(e).message, "bad"));
       }
     }),
     h(
       "p",
       { class: "hint" },
-      "Próba jest zachowana tylko w pamięci karty. Nie odświeżaj jej do rozstrzygnięcia wyniku.",
+      "Pr\xF3ba jest zachowana tylko w pami\u0119ci karty. Nie od\u015Bwie\u017Caj jej do rozstrzygni\u0119cia wyniku.",
     ),
   );
 }
 async function act(type, body, { after, prepare } = {}) {
   if (state.busy) return false;
+  if (!state.current || !state.data) {
+    say("Wybierz to\u017Csamo\u015B\u0107 i poczekaj na jej dane.", "warn");
+    return false;
+  }
   if (api.pendingFor(state.current)) {
-    say("Najpierw sprawdź wynik poprzedniej próby.", "warn");
+    say("Najpierw sprawd\u017A wynik poprzedniej pr\xF3by.", "warn");
     return false;
   }
   const signer = state.vault?.get(state.signerId);
   if (!signer) {
-    say("Odblokuj i wybierz klucz. Ta zmiana nie została podpisana.", "warn");
+    say(
+      "Odblokuj i wybierz klucz. Ta zmiana nie zosta\u0142a podpisana.",
+      "warn",
+    );
     return false;
   }
   if (state.data.integrity === "error") {
-    say("Zapis wstrzymany z powodu integralności dziennika.", "bad");
+    say("Zapis wstrzymany z powodu integralno\u015Bci dziennika.", "bad");
     return false;
   }
   const id = state.current,
     key = draftKey(),
     head = structuredClone(bases.get(key) || state.data.head);
-  const confirmedBody = structuredClone(body); // UI inputs can no longer change the approved bytes.
+  const confirmedBody = structuredClone(body);
   state.busy = true;
   root.setAttribute("aria-busy", "true");
   say(null);
@@ -964,11 +789,11 @@ async function act(type, body, { after, prepare } = {}) {
       return false;
     say(
       prepare
-        ? "Przesyłanie bajtów po potwierdzeniu…"
-        : "Podpisywanie zmiany lokalnie…",
+        ? "Przesy\u0142anie bajt\xF3w po potwierdzeniu\u2026"
+        : "Podpisywanie zmiany lokalnie\u2026",
     );
     if (prepare) await prepare();
-    say("Wysyłanie podpisanej operacji…");
+    say("Wysy\u0142anie podpisanej operacji\u2026");
     const result = await api.publish({
       signer,
       identity: id,
@@ -982,7 +807,7 @@ async function act(type, body, { after, prepare } = {}) {
     if (type === "project.create") state.projectId = result.id;
     if (after) await after();
     state.message = {
-      text: "Zdarzenie przyjęte i podpis potwierdzony przez serwer.",
+      text: "Zdarzenie przyj\u0119te i podpis potwierdzony przez serwer.",
       kind: "ok",
     };
     state.busy = false;
@@ -990,16 +815,17 @@ async function act(type, body, { after, prepare } = {}) {
     history.replaceState(null, "", url());
     return true;
   } catch (e) {
-    if (e.code === "unknown_outcome") {
+    if (failure(e).code === "unknown_outcome") {
       capture();
       state.busy = false;
       render();
     } else {
-      if (e.code === "blob_not_found") uploaded.delete(confirmedBody.hash);
-      say(e.message, "bad");
-      if (["bad_seq", "bad_prev"].includes(e.code)) {
+      if (failure(e).code === "blob_not_found")
+        uploaded.delete(confirmedBody.hash);
+      say(failure(e).message, "bad");
+      if (["bad_seq", "bad_prev"].includes(failure(e).code)) {
         const box = document.getElementById("msg");
-        box.append(
+        box?.append(
           h(
             "button",
             {
@@ -1009,8 +835,8 @@ async function act(type, body, { after, prepare } = {}) {
                 if (state.busy) return;
                 if (
                   !(await ask(
-                    "Odczytać nowszy stan?",
-                    "Szkic zostanie zachowany. Porównaj go z aktualnymi danymi; kolejny zapis wymaga ponownego potwierdzenia.",
+                    "Odczyta\u0107 nowszy stan?",
+                    "Szkic zostanie zachowany. Por\xF3wnaj go z aktualnymi danymi; kolejny zapis wymaga ponownego potwierdzenia.",
                     "Odczytaj bez podpisywania",
                   ))
                 )
@@ -1018,13 +844,14 @@ async function act(type, body, { after, prepare } = {}) {
                 try {
                   capture();
                   await reload();
-                  bases.set(key, structuredClone(state.data.head));
+                  if (state.data)
+                    bases.set(key, structuredClone(state.data.head));
                   say(
-                    "Odczytano nowszy stan. Sprawdź wartości i ponownie otwórz podsumowanie; niczego nie podpisano.",
+                    "Odczytano nowszy stan. Sprawd\u017A warto\u015Bci i ponownie otw\xF3rz podsumowanie; niczego nie podpisano.",
                     "warn",
                   );
                 } catch (err) {
-                  say(err.message, "bad");
+                  say(failure(err).message, "bad");
                 }
               },
             },
@@ -1044,7 +871,7 @@ async function uploadSession() {
   try {
     session = await api.me();
   } catch (e) {
-    if (e.status !== 401) throw e;
+    if (failure(e).status !== 401) throw e;
   }
   if (!session || (state.authId && session.key !== state.authId)) {
     const auth = state.vault?.get(state.authId);
@@ -1059,11 +886,17 @@ async function uploadSession() {
 }
 async function publishFile(file, fields) {
   if (state.busy) return false;
+  if (!state.current || !state.data) {
+    say("Wybierz to\u017Csamo\u015B\u0107 i poczekaj na jej dane.", "warn");
+    return false;
+  }
   try {
     validateFile(file, fields.path, fields.media_type);
     const source = fileResource(state.current, fields.path, fields.project_id);
     if (!can("resource.put", source))
-      throw new Error("Wybrany klucz nie może publikować w tym miejscu.");
+      throw new Error(
+        "Wybrany klucz nie mo\u017Ce publikowa\u0107 w tym miejscu.",
+      );
     const exists = state.data.resources.find(
       (r) =>
         r.path === fields.path &&
@@ -1072,10 +905,10 @@ async function publishFile(file, fields) {
     if (exists) {
       if (
         !(await ask(
-          "Zastąpić istniejący plik?",
+          "Zast\u0105pi\u0107 istniej\u0105cy plik?",
           fields.path +
-            " już istnieje. Zachowasz jego ID; poprzednia wersja zostanie zastąpiona.",
-          "Przygotuj zastąpienie",
+            " ju\u017C istnieje. Zachowasz jego ID; poprzednia wersja zostanie zast\u0105piona.",
+          "Przygotuj zast\u0105pienie",
         ))
       )
         return false;
@@ -1099,506 +932,16 @@ async function publishFile(file, fields) {
             stored.media_type !== fields.media_type
           )
             throw new Error(
-              "Metadane uploadu nie odpowiadają zatwierdzonemu plikowi.",
+              "Metadane uploadu nie odpowiadaj\u0105 zatwierdzonemu plikowi.",
             );
           uploaded.add(hash);
         },
       },
     );
   } catch (e) {
-    say(e.message, "bad");
+    say(failure(e).message, "bad");
     return false;
   }
 }
-
-// profil
-
-function profileSection(d) {
-  const inputs = Object.fromEntries(
-    PROFILE_FIELDS.map(([name, , kind]) => [
-      name,
-      kind === "textarea"
-        ? h(
-            "textarea",
-            { id: "p-" + name, rows: 5, maxlength: 2000 },
-            d.profile[name] || "",
-          )
-        : h("input", {
-            id: "p-" + name,
-            value: d.profile[name] || "",
-            maxlength: name === "website" ? 200 : 80,
-          }),
-    ]),
-  );
-
-  // Editing a draft is never an authorization decision. Validate the actual
-  // changed fields before any signature; the server is authoritative as well.
-  const allowedFields = PROFILE_FIELDS.filter(([name]) =>
-    can("profile.update", d.id + "/profile/" + name),
-  ).map(([name]) => name);
-  return h(
-    "section",
-    { class: "panel", "aria-labelledby": "profile-h" },
-    h("h2", { id: "profile-h" }, "Profil"),
-    h("p", { class: "hint" }, "ID tożsamości: ", copyButton(d.id)),
-    h(
-      "p",
-      { class: "hint" },
-      allowedFields.length === PROFILE_FIELDS.length
-        ? "Możesz edytować profil. Każda zmiana wymaga osobnego podpisu."
-        : "Możesz przygotować szkic. Zapis wymaga uprawnienia do każdego zmienionego pola; zmiana klucza nie zmienia tożsamości.",
-    ),
-    h(
-      "form",
-      {
-        class: "stack",
-        onsubmit: async (e) => {
-          e.preventDefault();
-          const fields = {};
-          for (const [name] of PROFILE_FIELDS) {
-            const value = inputs[name].value.trim();
-            const before = d.profile[name] ?? "";
-            if (value !== before) fields[name] = value === "" ? null : value;
-          }
-          if (Object.keys(fields).length === 0) {
-            return say("Nic się nie zmieniło.");
-          }
-          const missing = Object.keys(fields).filter(
-            (name) => !can("profile.update", d.id + "/profile/" + name),
-          );
-          if (missing.length) {
-            return say(
-              "Ten klucz nie może zmienić pól: " +
-                missing
-                  .map(
-                    (name) =>
-                      PROFILE_FIELDS.find((f) => f[0] === name)?.[1] || name,
-                  )
-                  .join(", ") +
-                ". Wybierz uprawniony klucz; szkic pozostaje w formularzu.",
-              "warn",
-            );
-          }
-          await act("profile.update", { fields });
-        },
-      },
-      PROFILE_FIELDS.map(([name, label]) =>
-        field(
-          label,
-          inputs[name],
-          allowedFields.includes(name)
-            ? undefined
-            : "Do podpisania tego pola potrzebny jest inny klucz lub grant.",
-        ),
-      ),
-      h(
-        "div",
-        { class: "actions" },
-        h(
-          "button",
-          { class: "btn primary", type: "submit", id: "save-profile" },
-          "Podpisz i zapisz profil",
-        ),
-      ),
-    ),
-  );
-}
-
-function avatarSection(d) {
-  const file = h("input", {
-    id: "avatar-file",
-    type: "file",
-    accept: "image/png,image/jpeg,image/webp",
-  });
-  const status = h(
-    "p",
-    { class: "hint", role: "status" },
-    "Wybór zdjęcia niczego nie wysyła. Maksymalnie 10 MiB.",
-  );
-  file.addEventListener("change", () => {
-    const selected = file.files?.[0];
-    status.textContent = selected
-      ? "Przygotowano: " +
-        selected.name +
-        " (" +
-        selected.size +
-        " B). Niczego nie wysłano."
-      : "Nie wybrano pliku.";
-  });
-  const authorized = can("resource.put", fileResource(d.id, AVATAR_PATH, null));
-  return h(
-    "section",
-    { class: "panel profile-avatar", "aria-labelledby": "avatar-h" },
-    h("h2", { id: "avatar-h" }, "Zdjęcie profilowe"),
-    h(
-      "div",
-      { class: "avatar-editor" },
-      d.avatar_url
-        ? h("img", {
-            class: "avatar avatar-large avatar-photo",
-            src: d.avatar_url,
-            alt: "Bieżące zdjęcie profilowe",
-          })
-        : h(
-            "span",
-            { class: "avatar avatar-large", "aria-hidden": "true" },
-            (
-              label(d).replace(/^@/, "").trim().slice(0, 1) || "O"
-            ).toUpperCase(),
-          ),
-      h(
-        "div",
-        {},
-        h(
-          "p",
-          {},
-          "Obraz jest zasobem w przestrzeni głównej (images/avatar). Jego aktualizacja zachowuje ID.",
-        ),
-        h(
-          "p",
-          { class: "hint" },
-          "Publikacja wymaga uprawnienia resource.put dla tej ścieżki; nie wynika automatycznie z prawa do edycji opisu.",
-        ),
-      ),
-    ),
-    h(
-      "form",
-      {
-        class: "stack",
-        id: "avatar-upload",
-        onsubmit: async (e) => {
-          e.preventDefault();
-          const selected = file.files?.[0];
-          if (!selected) return say("Wybierz zdjęcie profilowe.", "warn");
-          try {
-            const mediaType = avatarMediaType(selected);
-            if (!can("resource.put", fileResource(d.id, AVATAR_PATH, null)))
-              return say(
-                "Ten klucz nie może publikować zdjęcia profilowego. Potrzebne jest resource.put na images/avatar w przestrzeni głównej.",
-                "warn",
-              );
-            await publishFile(selected, {
-              path: AVATAR_PATH,
-              project_id: null,
-              media_type: mediaType,
-              meta: {
-                title: "Zdjęcie profilowe",
-                alt: "Zdjęcie profilowe " + label(d),
-              },
-            });
-          } catch (err) {
-            say(err.message, "bad");
-          }
-        },
-      },
-      field("Nowe zdjęcie", file),
-      status,
-      h(
-        "button",
-        {
-          type: "submit",
-          class: "btn primary",
-          id: "save-avatar",
-          disabled: !authorized,
-        },
-        "Sprawdź i opublikuj zdjęcie",
-      ),
-      !authorized &&
-        notice(
-          "Wybrany klucz nie posiada uprawnienia do publikacji zdjęcia. Wybierz klucz z odpowiednim grantem.",
-          "warn",
-        ),
-    ),
-  );
-}
-
-// Widoczność nie jest częścią profilu: zawsze zmieniamy ją podpisanym zdarzeniem.
-function visibilitySection(d) {
-  const visibility = h(
-    "select",
-    { id: "i-visibility" },
-    h(
-      "option",
-      { value: "public", selected: d.visibility === "public" },
-      "Publiczna (w katalogu)",
-    ),
-    h(
-      "option",
-      { value: "unlisted", selected: d.visibility === "unlisted" },
-      "Nieindeksowana (tylko z linku)",
-    ),
-  );
-  return h(
-    "section",
-    { class: "panel", "aria-labelledby": "visibility-h" },
-    h("h2", { id: "visibility-h" }, "Widoczność"),
-    h(
-      "p",
-      { class: "muted" },
-      "Nieindeksowana tożsamość nie pojawia się w katalogu ani galerii. Profil, historia, pliki i własna strona nadal są dostępne z bezpośredniego adresu.",
-    ),
-    h(
-      "form",
-      {
-        class: "stack",
-        onsubmit: async (e) => {
-          e.preventDefault();
-          if (visibility.value === d.visibility)
-            return say("Widoczność się nie zmieniła.");
-          await act("identity.visibility.set", {
-            visibility: visibility.value,
-          });
-        },
-      },
-      field("Widoczność profilu", visibility),
-      h(
-        "div",
-        { class: "actions" },
-        h(
-          "button",
-          { class: "btn primary", type: "submit", id: "save-visibility" },
-          "Podpisz zmianę widoczności",
-        ),
-      ),
-    ),
-  );
-}
-
-// klucze
-
-function keysSection(d) {
-  const label = h("input", {
-    id: "k-label",
-    maxlength: 40,
-    placeholder: "np. laptop, bot-wydawca",
-  });
-  const pasted = h("input", {
-    id: "k-pasted",
-    autocomplete: "off",
-    placeholder: "id klucza z innej przeglądarki",
-  });
-  const authLabel = h("input", {
-    id: "ak-label",
-    maxlength: 40,
-    placeholder: "np. telefon",
-  });
-
-  const addDevice = async (e) => {
-    e.preventDefault();
-    let id = pasted.value.trim();
-    let created = null;
-    if (!id) {
-      created = await generateKey(
-        "signing",
-        label.value.trim() || "urządzenie",
-      );
-      id = created.id;
-      pasted.value = id;
-      state.vault.add(created);
-      await state.vault.save();
-    }
-    const body = { key: id };
-    if (label.value.trim()) body.label = label.value.trim();
-    await act("key.add", body);
-  };
-
-  let stagedAuth = null;
-  const addAuth = async (e) => {
-    e.preventDefault();
-    const created =
-      stagedAuth ||
-      (await generateKey("auth", authLabel.value.trim() || "upload"));
-    stagedAuth = created;
-    state.vault.add(created);
-    await state.vault.save();
-    if (await act("auth_key.add", { key: created.id })) stagedAuth = null;
-  };
-
-  const activeAuth = d.auth_keys.filter((k) => k.status === "active").length;
-
-  return h(
-    "section",
-    { class: "panel", "aria-labelledby": "keys-h" },
-    h("h2", { id: "keys-h" }, "Klucze"),
-    h(
-      "p",
-      { class: "section-note" },
-      "Klucz założycielski podpisuje i nadaje uprawnienia. Klucze autoryzacji uwierzytelniają wysyłanie plików; odczyt Pracowni jest publiczny. Klucze urządzeń i botów dopisujesz tu, a ich uprawnienia dają granty.",
-    ),
-    h(
-      "dl",
-      { class: "facts" },
-      h(
-        "div",
-        {},
-        h("dt", {}, "Klucz założycielski"),
-        h("dd", {}, copyButton(d.founding_key)),
-      ),
-    ),
-    h("h3", {}, "Klucze logowania"),
-    h(
-      "ul",
-      { class: "res-list" },
-      d.auth_keys.map((k) =>
-        h(
-          "li",
-          {},
-          h(
-            "span",
-            { class: "res-main" },
-            copyButton(k.key_id),
-            " ",
-            k.status === "revoked"
-              ? h("span", { class: "tag bad" }, "cofnięty")
-              : state.vault?.get(k.key_id) &&
-                  h("span", { class: "tag" }, "w tej przeglądarce"),
-          ),
-          k.status === "active" &&
-            activeAuth > 1 &&
-            h(
-              "button",
-              {
-                class: "btn small",
-                type: "button",
-                onclick: () => act("auth_key.revoke", { key: k.key_id }),
-              },
-              "Cofnij",
-            ),
-        ),
-      ),
-    ),
-    h(
-      "form",
-      {
-        class: "inline",
-        onsubmit: (e) => addAuth(e).catch((err) => say(err.message, "bad")),
-      },
-      field("Nowy klucz logowania (powstaje tu, trafia do skarbca)", authLabel),
-      h("button", { class: "btn", type: "submit", id: "add-auth" }, "Dodaj"),
-    ),
-    h("h3", {}, "Klucze urządzeń i botów"),
-    d.members.length === 0
-      ? h("p", { class: "muted" }, "Brak dopisanych kluczy.")
-      : h(
-          "ul",
-          { class: "res-list" },
-          d.members.map((m) =>
-            h(
-              "li",
-              {},
-              h(
-                "span",
-                { class: "res-main" },
-                copyButton(m.key_id),
-                " ",
-                m.label && h("span", { class: "muted" }, m.label),
-                " ",
-                m.status === "revoked" &&
-                  h("span", { class: "tag bad" }, "cofnięty"),
-              ),
-              m.status === "active" &&
-                h(
-                  "button",
-                  {
-                    class: "btn small",
-                    type: "button",
-                    onclick: () => act("key.revoke", { key: m.key_id }),
-                  },
-                  "Cofnij",
-                ),
-            ),
-          ),
-        ),
-    h(
-      "form",
-      {
-        class: "stack",
-        onsubmit: (e) => addDevice(e).catch((err) => say(err.message, "bad")),
-      },
-      h(
-        "div",
-        { class: "grid2" },
-        field("Etykieta", label),
-        field(
-          "Albo wklej id istniejącego klucza",
-          pasted,
-          "Puste = wygeneruj nowy klucz w tej przeglądarce.",
-        ),
-      ),
-      h(
-        "div",
-        { class: "actions" },
-        h(
-          "button",
-          { class: "btn", type: "submit", id: "add-device" },
-          "Dopisz klucz",
-        ),
-      ),
-    ),
-  );
-}
-
-// kopie zapasowe
-
-function backupSection() {
-  return h(
-    "section",
-    { class: "panel", "aria-labelledby": "backup-h" },
-    h("h2", { id: "backup-h" }, "Kopie zapasowe i eksport"),
-    h(
-      "p",
-      { class: "section-note" },
-      "Skarbiec jest szyfrowany Twoim hasłem. Kopia zapasowa to ten sam zaszyfrowany plik: bez niego i bez hasła klucze przepadną z przeglądarką.",
-    ),
-    h(
-      "div",
-      { class: "actions" },
-      h(
-        "button",
-        {
-          class: "btn",
-          type: "button",
-          id: "backup",
-          onclick: async () =>
-            download(
-              `oktavarium-kopia-${new Date().toISOString().slice(0, 10)}.json`,
-              await state.vault.backupFile(),
-            ),
-        },
-        "Pobierz zaszyfrowaną kopię",
-      ),
-      h(
-        "details",
-        { class: "danger" },
-        h("summary", {}, "Eksport klucza do CLI (jawny plik)"),
-        h(
-          "p",
-          { class: "muted" },
-          "Plik zawiera klucz prywatny bez szyfrowania, w formacie `mix oktavarium.key.gen`. Kto go ma, może podpisywać jako ten klucz.",
-        ),
-        state.vault.keys.map((k) =>
-          h(
-            "button",
-            {
-              class: "btn small",
-              type: "button",
-              onclick: async () =>
-                (await ask(
-                  "Eksport jawnego klucza",
-                  "Ten plik nie jest szyfrowany. Nie udostępniaj go innym.",
-                  "Eksportuj",
-                )) &&
-                download(
-                  `${k.kind}-${short(k.id).replace("…", "-")}.key`,
-                  await cliKeyfile(k),
-                ),
-            },
-            `${k.kind} · ${short(k.id)}`,
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
 if (root?.dataset.page === "studio") start();
+export { start };

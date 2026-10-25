@@ -1,8 +1,8 @@
+import { failure } from "../lib/failure.js";
 import { h, field, actionLabel } from "../lib/ui.js";
 import { copyButton } from "../lib/copy-id.js";
 import { short } from "../lib/bytes.js";
 import { delegatedBody, projectResource, active } from "../lib/permissions.js";
-
 const ACTIONS = [
   "resource.put",
   "resource.delete",
@@ -22,19 +22,19 @@ const ACTIONS = [
 ];
 const STATUS = {
   active: "aktywne",
-  revoked: "cofnięte",
-  expired: "wygasło",
+  revoked: "cofni\u0119te",
+  expired: "wygas\u0142o",
   pending: "oczekuje",
-  broken: "łańcuch przerwany",
+  broken: "\u0142a\u0144cuch przerwany",
 };
-
-export function grantsSection(
+function grantsSection(
   d,
   { editable = true, access, selected, keys, signerId, act, say, can },
 ) {
-  const known = new Map();
+  const known = /* @__PURE__ */ new Map();
   for (const m of d.members)
-    if (m.status === "active") known.set(m.key_id, m.label || "urządzenie");
+    if (m.status === "active")
+      known.set(m.key_id, m.label || "urz\u0105dzenie");
   for (const k of keys)
     if (k.kind === "signing" && k.id !== d.founding_key)
       known.set(k.id, known.get(k.id) || k.label || "klucz lokalny");
@@ -42,14 +42,14 @@ export function grantsSection(
     "select",
     { id: "g-subject" },
     [...known].map(([value, label]) =>
-      h("option", { value }, label + " · " + short(value)),
+      h("option", { value }, label + " \xB7 " + short(value)),
     ),
-    h("option", { value: "" }, "inny klucz (wpisz poniżej)"),
+    h("option", { value: "" }, "inny klucz (wpisz poni\u017Cej)"),
   );
   const other = h("input", {
     id: "g-other",
     autocomplete: "off",
-    placeholder: "pełne id klucza sygnowania",
+    placeholder: "pe\u0142ne id klucza sygnowania",
   });
   const action = h(
     "select",
@@ -71,7 +71,7 @@ export function grantsSection(
     h(
       "option",
       { value: "", selected: !selected },
-      "Tożsamość (zakres ręczny)",
+      "To\u017Csamo\u015B\u0107 (zakres r\u0119czny)",
     ),
     d.projects.map((p) =>
       h(
@@ -95,7 +95,7 @@ export function grantsSection(
     min: 1,
     max: 3650,
     step: 1,
-    placeholder: "dziedzicz / bez końca",
+    placeholder: "dziedzicz / bez ko\u0144ca",
   });
   const delegable = h("input", { id: "g-delegable", type: "checkbox" });
   const parents = (access?.grants || []).filter(
@@ -107,13 +107,15 @@ export function grantsSection(
     h(
       "option",
       { value: "" },
-      access?.founder ? "Klucz założycielski" : "Wybierz grant nadrzędny",
+      access?.founder
+        ? "Klucz za\u0142o\u017Cycielski"
+        : "Wybierz grant nadrz\u0119dny",
     ),
     parents.map((g) =>
       h(
         "option",
         { value: g.id },
-        `${g.action} · ${g.resource} · ${short(g.id)}`,
+        `${g.action} \xB7 ${g.resource} \xB7 ${short(g.id)}`,
       ),
     ),
   );
@@ -139,16 +141,16 @@ export function grantsSection(
           const subj = other.value.trim() || subject.value;
           if (!verified.checked)
             return say(
-              "Porównaj pełny identyfikator klucza odbiorcy i potwierdź go.",
+              "Por\xF3wnaj pe\u0142ny identyfikator klucza odbiorcy i potwierd\u017A go.",
               "bad",
             );
           if (!/^[A-Za-z0-9_-]{43}$/.test(subj))
-            return say("Nieprawidłowy identyfikator klucza.", "bad");
+            return say("Nieprawid\u0142owy identyfikator klucza.", "bad");
           if (!subj) return say("Podaj klucz odbiorcy.", "bad");
           const suffix = resource.value.trim();
           if (!suffix || (!scope.value && !suffix.startsWith("/")))
             return say(
-              "Zakres tożsamości zaczyna się od /; wewnątrz projektu użyj np. images/* lub *.",
+              "Zakres to\u017Csamo\u015Bci zaczyna si\u0119 od /; wewn\u0105trz projektu u\u017Cyj np. images/* lub *.",
               "bad",
             );
           const target = scope.value
@@ -165,13 +167,13 @@ export function grantsSection(
           };
           if (days.value)
             body.expires_at =
-              Math.floor(Date.now() / 1000) + Number(days.value) * 86400;
+              Math.floor(Date.now() / 1e3) + Number(days.value) * 86400;
           await act(
             "grant.create",
             delegatedBody(body, access, parent.value || null),
           );
-        } catch (e) {
-          say(e.message, "bad");
+        } catch (e2) {
+          say(failure(e2).message, "bad");
         }
       },
     },
@@ -185,30 +187,35 @@ export function grantsSection(
       "label",
       { class: "check" },
       verified,
-      " Porównano pełny identyfikator z odbiorcą (nie tylko etykietę).",
+      " Por\xF3wnano pe\u0142ny identyfikator z odbiorc\u0105 (nie tylko etykiet\u0119).",
     ),
     h(
       "div",
       { class: "grid2" },
-      field("Co może", action),
-      field("Projekt / tożsamość", scope),
+      field("Co mo\u017Ce", action),
+      field("Projekt / to\u017Csamo\u015B\u0107", scope),
     ),
     field(
       "Zakres",
       resource,
-      "Projekt: * obejmuje cały projekt; images/* tylko obrazy. Uprawnienia nie są przypisane do nazwy projektu.",
+      "Projekt: * obejmuje ca\u0142y projekt; images/* tylko obrazy. Uprawnienia nie s\u0105 przypisane do nazwy projektu.",
     ),
     field(
       "Na podstawie grantu",
       parent,
-      "Delegat musi wskazać własny aktywny grant z prawem dalszego przekazywania.",
+      "Delegat musi wskaza\u0107 w\u0142asny aktywny grant z prawem dalszego przekazywania.",
     ),
     field(
-      "Ważne przez dni",
+      "Wa\u017Cne przez dni",
       days,
-      "Puste dziedziczy termin rodzica. Nie można go wydłużyć.",
+      "Puste dziedziczy termin rodzica. Nie mo\u017Cna go wyd\u0142u\u017Cy\u0107.",
     ),
-    h("label", { class: "check" }, delegable, " może przekazywać dalej"),
+    h(
+      "label",
+      { class: "check" },
+      delegable,
+      " mo\u017Ce przekazywa\u0107 dalej",
+    ),
     h(
       "button",
       {
@@ -302,7 +309,7 @@ export function grantsSection(
           }),
         ),
       )
-    : h("p", { class: "muted" }, "Brak grantów.");
+    : h("p", { class: "muted" }, "Brak grant\xF3w.");
   return h(
     "section",
     { class: "panel", "aria-labelledby": "grants-h" },
@@ -310,15 +317,16 @@ export function grantsSection(
     h(
       "p",
       { class: "section-note" },
-      "resource.put publikuje; resource.delete usuwa i pozwala przenosić ze źródła. project.update zmienia projekt. * to administracja w wybranym zakresie. Nadawanie dalszych grantów wymaga delegable.",
+      "resource.put publikuje; resource.delete usuwa i pozwala przenosi\u0107 ze \u017Ar\xF3d\u0142a. project.update zmienia projekt. * to administracja w wybranym zakresie. Nadawanie dalszych grant\xF3w wymaga delegable.",
     ),
     editable
       ? form
       : h(
           "p",
           { class: "hint" },
-          "Odczyt grantów jest publiczny. Odblokuj klucz, aby nadać lub cofnąć dostęp.",
+          "Odczyt grant\xF3w jest publiczny. Odblokuj klucz, aby nada\u0107 lub cofn\u0105\u0107 dost\u0119p.",
         ),
     rows,
   );
 }
+export { grantsSection };

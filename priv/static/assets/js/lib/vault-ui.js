@@ -1,21 +1,29 @@
+import { failure } from "./failure.js";
 import { Vault, hasVault } from "./keystore.js";
 import { h, field, notice, modal } from "./ui.js";
-
-export async function unlockDialog() {
+async function unlockDialog() {
   if (!(await hasVault()))
-    return modal("Brak skarbca w tej przeglądarce", (box, done) => {
+    return modal("Brak skarbca w tej przegl\u0105darce", (box, done) => {
       box.append(
         h(
           "p",
           {},
-          "Odczyt działa bez kluczy. Do zapisu przywróć kopię albo utwórz tożsamość.",
+          "Odczyt dzia\u0142a bez kluczy. Do zapisu przywr\xF3\u0107 kopi\u0119 albo utw\xF3rz to\u017Csamo\u015B\u0107.",
         ),
-        h("a", { class: "btn", href: "/login?restore=1" }, "Przywróć kopię"),
-        h("a", { class: "btn", href: "/join" }, "Nowa tożsamość"),
+        h(
+          "a",
+          { class: "btn", href: "/login?restore=1" },
+          "Przywr\xF3\u0107 kopi\u0119",
+        ),
+        h(
+          "a",
+          { class: "btn", href: "/join" },
+          "Nowa to\u017Csamo\u015B\u0107",
+        ),
         h(
           "button",
           { class: "btn", type: "button", onclick: () => done(false) },
-          "Wróć do odczytu",
+          "Wr\xF3\u0107 do odczytu",
         ),
       );
     });
@@ -36,7 +44,7 @@ export async function unlockDialog() {
       h(
         "p",
         {},
-        "Hasło nie jest wysyłane. Odblokowanie nie tworzy sesji przesyłania i niczego nie podpisuje.",
+        "Has\u0142o nie jest wysy\u0142ane. Odblokowanie nie tworzy sesji przesy\u0142ania i niczego nie podpisuje.",
       ),
       h(
         "form",
@@ -51,16 +59,21 @@ export async function unlockDialog() {
               pass.value = "";
               done(vault);
             } catch (err) {
-              error.replaceChildren(notice(err.message, "bad"));
+              error.replaceChildren(notice(failure(err).message, "bad"));
               submit.disabled = false;
             }
           },
         },
-        field("Hasło skarbca", pass),
+        field("Has\u0142o skarbca", pass),
         error,
         submit,
       ),
-      h("a", { href: "/login?restore=1" }, "Przywracanie i pomoc z dostępem"),
+      h(
+        "a",
+        { href: "/login?restore=1" },
+        "Przywracanie i pomoc z dost\u0119pem",
+      ),
     );
   });
 }
+export { unlockDialog };

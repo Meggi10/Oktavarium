@@ -1,4 +1,4 @@
-// A new founder key is staged locally. Backup and local commit precede genesis.
+import { failure } from "../lib/failure.js";
 import { generateKey } from "../lib/crypto.js";
 import { Vault, hasVault, MIN_PASSPHRASE } from "../lib/keystore.js";
 import { localVault, enterStudio } from "../lib/local-state.js";
@@ -20,6 +20,7 @@ const state = {
   created: null,
   namePublished: false,
   namePending: false,
+  pending: null,
   values: {
     kind:
       new URLSearchParams(location.search).get("kind") === "collective"
@@ -29,12 +30,11 @@ const state = {
     handle: "",
     displayName: "",
     invite: "",
-    reuse: true,
   },
 };
 let leaving = false;
 window.addEventListener("beforeunload", (e) => {
-  if (!leaving && state.founder && !state.created) {
+  if (!leaving && ((state.founder && !state.created) || api.hasPending())) {
     e.preventDefault();
     e.returnValue = "";
   }
@@ -58,9 +58,9 @@ async function run(fn) {
   try {
     await fn();
   } catch (e) {
-    state.error = e.message;
-    if (e.code === "unknown_outcome" && !state.created)
-      state.pending = e.attempt.identity;
+    state.error = failure(e).message;
+    if (failure(e).code === "unknown_outcome" && !state.created)
+      state.pending = failure(e).attemptIdentity;
   } finally {
     state.busy = false;
     render();
@@ -122,7 +122,7 @@ function render() {
     id: "pass",
     type: "password",
     required: !localVault(),
-    minlength: state.existing ? undefined : MIN_PASSPHRASE,
+    minlength: state.existing ? void 0 : MIN_PASSPHRASE,
     autocomplete: state.existing ? "current-password" : "new-password",
   });
   const repeat =
@@ -165,9 +165,9 @@ function render() {
     h(
       "div",
       { class: "grid2" },
-      field("Rodzaj tożsamości", kind),
+      field("Rodzaj to\u017Csamo\u015Bci", kind),
       field(
-        "Obecność w katalogu",
+        "Obecno\u015B\u0107 w katalogu",
         visibility,
         "Nieindeksowana nie oznacza prywatnej.",
       ),
@@ -175,12 +175,12 @@ function render() {
     field(
       "Uchwyt (opcjonalny)",
       handle,
-      "2–32 znaki: małe litery, cyfry, _ i -.",
+      "2\u201332 znaki: ma\u0142e litery, cyfry, _ i -.",
     ),
     field(
-      "Nazwa wyświetlana (opcjonalna)",
+      "Nazwa wy\u015Bwietlana (opcjonalna)",
       displayName,
-      "Np. Pracownia Północ. Nie zmienia @uchwytu ani adresu; po utworzeniu wymaga osobnego podpisu.",
+      "Np. Pracownia P\xF3\u0142noc. Nie zmienia @uchwytu ani adresu; po utworzeniu wymaga osobnego podpisu.",
     ),
     invite && field("Token od operatora instancji", invite),
   );
@@ -189,16 +189,18 @@ function render() {
       form.append(
         ...[
           field(
-            state.existing ? "Hasło obecnego skarbca" : "Hasło nowego skarbca",
+            state.existing
+              ? "Has\u0142o obecnego skarbca"
+              : "Has\u0142o nowego skarbca",
             secret,
           ),
-          repeat && field("Powtórz hasło", repeat),
+          repeat && field("Powt\xF3rz has\u0142o", repeat),
         ].filter(Boolean),
       );
     else
       form.append(
         notice(
-          "Lokalny skarbiec jest odblokowany. Dodasz klucze bez zastępowania istniejących.",
+          "Lokalny skarbiec jest odblokowany. Dodasz klucze bez zast\u0119powania istniej\u0105cych.",
         ),
       );
     if (state.existing)
@@ -207,14 +209,14 @@ function render() {
           "label",
           { class: "check" },
           reuse,
-          " Użyj istniejącego klucza autoryzacji. Klucz założycielski będzie nowy.",
+          " U\u017Cyj istniej\u0105cego klucza autoryzacji. Klucz za\u0142o\u017Cycielski b\u0119dzie nowy.",
         ),
       );
     form.append(
       h(
         "button",
         { type: "submit", class: "btn primary", disabled: state.busy },
-        state.busy ? "Przygotowanie…" : "Przygotuj klucze lokalnie",
+        state.busy ? "Przygotowanie\u2026" : "Przygotuj klucze lokalnie",
       ),
     );
   } else {
@@ -222,19 +224,24 @@ function render() {
       h(
         "section",
         { class: "panel" },
-        h("h2", {}, "Zabezpiecz klucze przed utworzeniem tożsamości"),
-        h("p", {}, "Klucz założycielski: ", h("code", {}, state.founder.id)),
+        h("h2", {}, "Zabezpiecz klucze przed utworzeniem to\u017Csamo\u015Bci"),
+        h(
+          "p",
+          {},
+          "Klucz za\u0142o\u017Cycielski: ",
+          h("code", {}, state.founder.id),
+        ),
         h(
           "p",
           { class: "hint" },
-          "Zmiana uchwytu nie generuje nowych kluczy. Kopia zawiera cały przygotowany skarbiec.",
+          "Zmiana uchwytu nie generuje nowych kluczy. Kopia zawiera ca\u0142y przygotowany skarbiec.",
         ),
         button(
-          "Pobierz zaszyfrowaną kopię",
+          "Pobierz zaszyfrowan\u0105 kopi\u0119",
           async () => {
             download(
               "oktavarium-kopia-" +
-                new Date().toISOString().slice(0, 10) +
+                /* @__PURE__ */ new Date().toISOString().slice(0, 10) +
                 ".json",
               await state.vault.backupFile(),
             );
@@ -255,7 +262,7 @@ function render() {
               render();
             },
           }),
-          " Potwierdzam, że kopia została zapisana w bezpiecznym miejscu.",
+          " Potwierdzam, \u017Ce kopia zosta\u0142a zapisana w bezpiecznym miejscu.",
         ),
       ),
       h(
@@ -266,18 +273,22 @@ function render() {
           class: "btn primary",
           disabled: state.busy || !state.backedUp || Boolean(state.pending),
         },
-        "Sprawdź utworzenie tożsamości",
+        "Sprawd\u017A utworzenie to\u017Csamo\u015Bci",
       ),
     );
   }
   mount(
     root,
-    h("p", { class: "eyebrow" }, "Tożsamość → klucze → kopia → podpis"),
-    h("h1", {}, "Załóż tożsamość"),
+    h(
+      "p",
+      { class: "eyebrow" },
+      "To\u017Csamo\u015B\u0107 \u2192 klucze \u2192 kopia \u2192 podpis",
+    ),
+    h("h1", {}, "Za\u0142\xF3\u017C to\u017Csamo\u015B\u0107"),
     h(
       "p",
       { class: "lead" },
-      "Osoba i kolektyw mają ten sam model. Odczyt jest otwarty; klucze służą do zatwierdzania zmian.",
+      "Osoba i kolektyw maj\u0105 ten sam model. Odczyt jest otwarty; klucze s\u0142u\u017C\u0105 do zatwierdzania zmian.",
     ),
     state.error && notice(state.error, "bad"),
     form,
@@ -285,40 +296,40 @@ function render() {
     h(
       "p",
       { class: "hint" },
-      "Nie ma resetu hasła przez serwer. Zachowaj kopię i hasło. Nie udostępniaj prywatnego klucza współpracownikom — nadaj grant ich kluczowi.",
+      "Nie ma resetu has\u0142a przez serwer. Zachowaj kopi\u0119 i has\u0142o. Nie udost\u0119pniaj prywatnego klucza wsp\xF3\u0142pracownikom \u2014 nadaj grant ich kluczowi.",
     ),
-    h("a", { href: "/login" }, "Mam już klucze"),
+    h("a", { href: "/login" }, "Mam ju\u017C klucze"),
   );
 }
 async function prepare(pass, repeat, reuse) {
   const v = state.values;
   if (v.handle && !/^[a-z0-9][a-z0-9_-]{1,31}$/.test(v.handle))
-    throw new Error("Nieprawidłowy uchwyt.");
+    throw new Error("Nieprawid\u0142owy uchwyt.");
   if (
     v.displayName &&
-    (v.displayName.length > 80 || /[\x00-\x1f\x7f-\x9f]/u.test(v.displayName))
+    (v.displayName.length > 80 || /\p{Cc}/u.test(v.displayName))
   )
     throw new Error(
-      "Nazwa wyświetlana nie może zawierać znaków sterujących ani przekraczać 80 znaków.",
+      "Nazwa wy\u015Bwietlana nie mo\u017Ce zawiera\u0107 znak\xF3w steruj\u0105cych ani przekracza\u0107 80 znak\xF3w.",
     );
   if (closed && !v.invite) throw new Error("Wklej token od operatora.");
   const existing =
     localVault() || (state.existing ? await Vault.unlock(pass) : null);
   if (!existing && (pass.length < MIN_PASSPHRASE || pass !== repeat))
     throw new Error(
-      "Hasła muszą się zgadzać i mieć co najmniej " +
+      "Has\u0142a musz\u0105 si\u0119 zgadza\u0107 i mie\u0107 co najmniej " +
         MIN_PASSPHRASE +
-        " znaków.",
+        " znak\xF3w.",
     );
   const staged = Vault.empty(existing?.passphrase || pass);
   if (existing) staged.data = structuredClone(existing.data);
   const founder = await generateKey(
     "signing",
-    v.handle ? "@" + v.handle : "Założycielski",
+    v.handle ? "@" + v.handle : "Za\u0142o\u017Cycielski",
   );
   const auth =
     (reuse && existing?.ofKind("auth")[0]) ||
-    (await generateKey("auth", "Przesyłanie plików"));
+    (await generateKey("auth", "Przesy\u0142anie plik\xF3w"));
   staged.add(founder);
   staged.add(auth);
   state.vault = staged;
@@ -329,6 +340,8 @@ async function prepare(pass, repeat, reuse) {
 }
 async function create() {
   if (!state.backedUp || state.pending) return;
+  if (!state.vault || !state.founder || !state.auth)
+    throw new Error("Przygotuj i zabezpiecz klucze przed utworzeniem.");
   const v = state.values;
   const body = {
     kind: v.kind,
@@ -341,11 +354,9 @@ async function create() {
       type: "identity.genesis",
       body,
       signer: state.founder,
-      identity: null,
     }))
   )
     return;
-  // failed IndexedDB commit stops here
   await state.vault.save();
   const receipt = await api.genesis({
     founder: state.founder,
@@ -357,13 +368,17 @@ async function create() {
 async function finish(receipt) {
   state.created = receipt;
   state.pending = null;
+  if (!state.vault || !state.founder)
+    throw new Error(
+      "To\u017Csamo\u015B\u0107 powsta\u0142a, ale nie ma odblokowanego skarbca do zapisania etykiety.",
+    );
   state.vault.update(state.founder.id, { identity: receipt.identity });
   try {
     await state.vault.save();
   } catch (e) {
     state.error =
-      "Tożsamość powstała, ale nie zapisano jej lokalnej etykiety. Klucze były zapisane przed publikacją. Pobierz zaktualizowaną kopię. " +
-      e.message;
+      "To\u017Csamo\u015B\u0107 powsta\u0142a, ale nie zapisano jej lokalnej etykiety. Klucze by\u0142y zapisane przed publikacj\u0105. Pobierz zaktualizowan\u0105 kopi\u0119. " +
+      failure(e).message;
   }
 }
 function pending() {
@@ -373,24 +388,29 @@ function pending() {
     "section",
     { class: "panel pending-write" },
     h("h2", {}, "Nieznany wynik utworzenia"),
-    h("p", {}, "ID próby: ", h("code", {}, id)),
-    button("Sprawdź tę samą próbę", async () => {
+    h("p", {}, "ID pr\xF3by: ", h("code", {}, id)),
+    button("Sprawd\u017A t\u0119 sam\u0105 pr\xF3b\u0119", async () => {
       const r = await api.checkPending(id);
       if (r) await finish(r);
       else
         state.error =
           "Nie znaleziono jeszcze zdarzenia. Brak odpowiedzi nie oznacza odrzucenia.";
     }),
-    button("Wyślij ponownie identyczną kopertę", async () =>
+    button("Wy\u015Blij ponownie identyczn\u0105 kopert\u0119", async () =>
       finish(await api.retryPending(id)),
     ),
   );
 }
-// Genesis intentionally contains no profile fields. The display name is a second,
-// separately approved signed event, not an implicit side effect of registration.
 async function publishName() {
   const name = state.values.displayName;
-  if (!name || state.namePublished || state.namePending) return;
+  if (
+    !name ||
+    state.namePublished ||
+    state.namePending ||
+    !state.founder ||
+    !state.created
+  )
+    return;
   const body = { fields: { display_name: name } };
   if (
     !(await confirmSign({
@@ -411,12 +431,12 @@ async function publishName() {
     });
     state.namePublished = true;
   } catch (e) {
-    if (e.code === "unknown_outcome") state.namePending = true;
+    if (failure(e).code === "unknown_outcome") state.namePending = true;
     throw e;
   }
 }
-
 async function reconcileName(retry) {
+  if (!state.created) return;
   const identity = state.created.identity;
   const receipt = retry
     ? await api.retryPending(identity)
@@ -429,25 +449,27 @@ async function reconcileName(retry) {
       "Nie odnaleziono jeszcze podpisanej nazwy. Wynik pozostaje nieznany.";
   }
 }
-
 function success() {
+  if (!state.created || !state.vault) return;
+  const vault = state.vault;
+  const identity = state.created.identity;
   const needsName = Boolean(state.values.displayName) && !state.namePublished;
   mount(
     root,
-    h("p", { class: "eyebrow" }, "Genesis przyjęte"),
-    h("h1", {}, "Tożsamość jest gotowa"),
+    h("p", { class: "eyebrow" }, "Genesis przyj\u0119te"),
+    h("h1", {}, "To\u017Csamo\u015B\u0107 jest gotowa"),
     state.error && notice(state.error, "warn"),
-    h("p", {}, "ID: ", h("code", {}, state.created.identity)),
+    h("p", {}, "ID: ", h("code", {}, identity)),
     h(
       "p",
       {},
-      "Nie logowaliśmy do serwera. Klucze pozostają odblokowane lokalnie.",
+      "Nie logowali\u015Bmy do serwera. Klucze pozostaj\u0105 odblokowane lokalnie.",
     ),
     needsName &&
       h(
         "section",
         { class: "panel stack", id: "publish-display-name" },
-        h("h2", {}, "Nazwa wyświetlana"),
+        h("h2", {}, "Nazwa wy\u015Bwietlana"),
         h(
           "p",
           {},
@@ -457,42 +479,45 @@ function success() {
         h(
           "p",
           { class: "hint" },
-          "Utworzenie tożsamości nie zapisuje profilu. Nazwę trzeba potwierdzić osobnym podpisem. Możesz też dodać ją później w Pracowni.",
+          "Utworzenie to\u017Csamo\u015Bci nie zapisuje profilu. Nazw\u0119 trzeba potwierdzi\u0107 osobnym podpisem. Mo\u017Cesz te\u017C doda\u0107 j\u0105 p\xF3\u017Aniej w Pracowni.",
         ),
         state.namePending
           ? h(
               "div",
               { class: "stack pending-write" },
               notice(
-                "Nie wiadomo, czy aktualizacja nazwy dotarła. Nie twórz nowego podpisu przed sprawdzeniem poprzedniej próby.",
+                "Nie wiadomo, czy aktualizacja nazwy dotar\u0142a. Nie tw\xF3rz nowego podpisu przed sprawdzeniem poprzedniej pr\xF3by.",
                 "warn",
               ),
               button(
-                "Sprawdź zapis nazwy",
+                "Sprawd\u017A zapis nazwy",
                 () => reconcileName(false),
                 "name-check",
               ),
               button(
-                "Ponów tę samą kopertę",
+                "Pon\xF3w t\u0119 sam\u0105 kopert\u0119",
                 () => reconcileName(true),
                 "name-retry",
               ),
             )
-          : button("Sprawdź i podpisz nazwę", publishName, "publish-name"),
+          : button(
+              "Sprawd\u017A i podpisz nazw\u0119",
+              publishName,
+              "publish-name",
+            ),
       ),
     state.namePublished &&
-      notice("Nazwa wyświetlana została zapisana w profilu.", "ok"),
-    button("Pobierz kopię z adresem nowej tożsamości", async () =>
-      download(
-        "oktavarium-kopia-utworzona.json",
-        await state.vault.backupFile(),
-      ),
+      notice("Nazwa wy\u015Bwietlana zosta\u0142a zapisana w profilu.", "ok"),
+    button(
+      "Pobierz kopi\u0119 z adresem nowej to\u017Csamo\u015Bci",
+      async () =>
+        download("oktavarium-kopia-utworzona.json", await vault.backupFile()),
     ),
     button(
-      "Otwórz w Pracowni",
+      "Otw\xF3rz w Pracowni",
       async () => {
         leaving = true;
-        await enterStudio(state.vault, state.created.identity);
+        await enterStudio(vault, identity);
       },
       "enter-studio",
     ),
@@ -502,6 +527,6 @@ function success() {
   state.existing = await hasVault();
   render();
 })().catch((e) => {
-  state.error = e.message;
+  state.error = failure(e).message;
   render();
 });

@@ -1,11 +1,11 @@
-// Public identifiers (signing keys, event IDs and SHA-256 hashes) can be copied
-// without entering an edit session. No private keys or secrets are ever copied.
-export function abbreviate(value) {
+import { failure } from "./failure.js";
+function abbreviate(value) {
   if (typeof value !== "string") return "";
-  return value.length > 14 ? value.slice(0, 6) + "…" + value.slice(-4) : value;
+  return value.length > 14
+    ? value.slice(0, 6) + "\u2026" + value.slice(-4)
+    : value;
 }
-
-export function copyButton(value, { label = "pełny identyfikator" } = {}) {
+function copyButton(value, { label = "pe\u0142ny identyfikator" } = {}) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "hash copy-id";
@@ -15,15 +15,13 @@ export function copyButton(value, { label = "pełny identyfikator" } = {}) {
   button.textContent = abbreviate(value);
   return button;
 }
-
-export async function copyText(value) {
+async function copyText(value) {
   if (typeof value !== "string" || !value)
     throw new Error("Brak identyfikatora.");
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
     return;
   }
-  // Fallback for non-secure dev origins. Fail visibly if copying is forbidden.
   const area = document.createElement("textarea");
   area.value = value;
   area.readOnly = true;
@@ -32,12 +30,11 @@ export async function copyText(value) {
   area.select();
   try {
     if (!document.execCommand?.("copy"))
-      throw new Error("Schowek jest niedostępny.");
+      throw new Error("Schowek jest niedost\u0119pny.");
   } finally {
     area.remove();
   }
 }
-
 let messageTimer;
 function feedback(message) {
   let box = document.getElementById("copy-feedback");
@@ -51,25 +48,25 @@ function feedback(message) {
   }
   box.textContent = message;
   box.hidden = false;
-  clearTimeout(messageTimer);
+  if (messageTimer) clearTimeout(messageTimer);
   messageTimer = setTimeout(() => {
     box.hidden = true;
   }, 2500);
 }
-
 if (typeof document !== "undefined") {
   document.addEventListener("click", async (event) => {
-    const button = event.target.closest?.("button[data-copy-value]");
+    const button = event.target?.closest("button[data-copy-value]");
     if (!button || button.disabled) return;
     try {
       await copyText(button.dataset.copyValue);
       button.classList.add("copied");
-      feedback("Skopiowano pełny identyfikator do schowka.");
+      feedback("Skopiowano pe\u0142ny identyfikator do schowka.");
       setTimeout(() => {
         if (button.isConnected) button.classList.remove("copied");
       }, 1500);
     } catch (error) {
-      feedback("Nie można skopiować: " + error.message);
+      feedback("Nie mo\u017Cna skopiowa\u0107: " + failure(error).message);
     }
   });
 }
+export { abbreviate, copyButton, copyText };

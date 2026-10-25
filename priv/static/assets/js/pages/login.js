@@ -1,4 +1,4 @@
-// /login is a local vault tool. It does not establish a server session.
+import { failure } from "../lib/failure.js";
 import { hasVault, Vault, restoreBackup } from "../lib/keystore.js";
 import { localVault, rememberVault, enterStudio } from "../lib/local-state.js";
 import { unlockDialog } from "../lib/vault-ui.js";
@@ -18,12 +18,16 @@ const state = {
 const ref = new URLSearchParams(location.search).get("ref");
 root.classList.add("auth-app");
 const header = () => [
-  h("p", { class: "eyebrow" }, "Klucze pozostają w przeglądarce"),
-  h("h1", {}, state.restoring ? "Przywróć skarbiec" : "Odblokuj klucze"),
+  h("p", { class: "eyebrow" }, "Klucze pozostaj\u0105 w przegl\u0105darce"),
+  h(
+    "h1",
+    {},
+    state.restoring ? "Przywr\xF3\u0107 skarbiec" : "Odblokuj klucze",
+  ),
   h(
     "p",
     { class: "lead" },
-    "Odczyt jest otwarty. Hasło odblokowuje tylko lokalne klucze; nie tworzy sesji na serwerze.",
+    "Odczyt jest otwarty. Has\u0142o odblokowuje tylko lokalne klucze; nie tworzy sesji na serwerze.",
   ),
   state.error && notice(state.error, "bad"),
 ];
@@ -45,7 +49,7 @@ async function run(fn) {
   try {
     await fn();
   } catch (e) {
-    state.error = e.message;
+    state.error = failure(e).message;
   } finally {
     state.busy = false;
     render();
@@ -86,7 +90,7 @@ function render() {
         run(async () => {
           if (state.restoring) {
             if (!file || file.size > 5 * 1024 * 1024)
-              throw new Error("Wybierz kopię JSON o rozmiarze do 5 MiB.");
+              throw new Error("Wybierz kopi\u0119 JSON o rozmiarze do 5 MiB.");
             let parsed;
             try {
               parsed = JSON.parse(await file.text());
@@ -108,14 +112,14 @@ function render() {
       },
     },
     state.restoring && field("Zaszyfrowana kopia", backup),
-    field("Hasło skarbca", pass),
+    field("Has\u0142o skarbca", pass),
     h(
       "button",
       { type: "submit", class: "btn primary", disabled: state.busy },
       state.busy
-        ? "Sprawdzanie…"
+        ? "Sprawdzanie\u2026"
         : state.restoring
-          ? "Sprawdź kopię bez zastępowania"
+          ? "Sprawd\u017A kopi\u0119 bez zast\u0119powania"
           : "Odblokuj lokalnie",
     ),
   );
@@ -126,8 +130,8 @@ function render() {
     state.has &&
       btn(
         state.restoring
-          ? "Mam skarbiec: wróć do odblokowania"
-          : "Wczytaj kopię zapasową",
+          ? "Mam skarbiec: wr\xF3\u0107 do odblokowania"
+          : "Wczytaj kopi\u0119 zapasow\u0105",
         async () => {
           state.restoring = !state.restoring;
           state.error = null;
@@ -136,30 +140,32 @@ function render() {
     h(
       "details",
       {},
-      h("summary", {}, "Nie pamiętam hasła lub nie mam kluczy"),
+      h("summary", {}, "Nie pami\u0119tam has\u0142a lub nie mam kluczy"),
       h(
         "p",
         {},
-        "Serwer nie zna hasła i nie może go zresetować. Sprawdź kopię, inną przeglądarkę lub inne nadal uprawnione klucze. Nowa tożsamość nie jest odzyskaniem starej.",
+        "Serwer nie zna has\u0142a i nie mo\u017Ce go zresetowa\u0107. Sprawd\u017A kopi\u0119, inn\u0105 przegl\u0105dark\u0119 lub inne nadal uprawnione klucze. Nowa to\u017Csamo\u015B\u0107 nie jest odzyskaniem starej.",
       ),
     ),
     h(
       "div",
       { class: "actions" },
-      h("a", { class: "btn", href: "/studio" }, "Przeglądaj bez kluczy"),
-      h("a", { class: "btn", href: "/join" }, "Nowa tożsamość"),
+      h("a", { class: "btn", href: "/studio" }, "Przegl\u0105daj bez kluczy"),
+      h("a", { class: "btn", href: "/join" }, "Nowa to\u017Csamo\u015B\u0107"),
     ),
   );
 }
 function review() {
+  const restored = state.restored;
+  if (!restored) return;
   const risk = h("input", { id: "restore-risk", type: "checkbox" });
   const typed = h("input", {
     id: "restore-confirm",
     autocomplete: "off",
-    placeholder: state.has ? "ZASTĄP" : "",
+    placeholder: state.has ? "ZAST\u0104P" : "",
     required: state.has,
   });
-  const lost = state.old?.keys.filter((k) => !state.restored.get(k.id));
+  const lost = state.old?.keys.filter((k) => !restored.get(k.id)) || [];
   const copy = h("input", {
     id: "old-backup-saved",
     type: "checkbox",
@@ -173,7 +179,7 @@ function review() {
       class: "btn danger",
       disabled: state.busy,
     },
-    state.has ? "Zastąp lokalny skarbiec" : "Zapisz skarbiec lokalnie",
+    state.has ? "Zast\u0105p lokalny skarbiec" : "Zapisz skarbiec lokalnie",
   );
   mount(
     root,
@@ -181,12 +187,12 @@ function review() {
     h(
       "section",
       { class: "panel" },
-      h("h2", {}, "Kopia została sprawdzona"),
-      h("p", {}, "Klucze w kopii: " + state.restored.keys.length),
+      h("h2", {}, "Kopia zosta\u0142a sprawdzona"),
+      h("p", {}, "Klucze w kopii: " + restored.keys.length),
       h(
         "ul",
         { class: "res-list" },
-        state.restored.keys.map((k) =>
+        restored.keys.map((k) =>
           h(
             "li",
             {},
@@ -201,17 +207,17 @@ function review() {
             ? lost.length
               ? "Klucze nieobecne w kopii: " +
                 lost.map((k) => k.label || short(k.id)).join(", ")
-              : "W kopii są wszystkie porównane klucze."
-            : "Obecny skarbiec jest zablokowany. Nie znamy jego zawartości i nie możemy porównać kluczy.",
+              : "W kopii s\u0105 wszystkie por\xF3wnane klucze."
+            : "Obecny skarbiec jest zablokowany. Nie znamy jego zawarto\u015Bci i nie mo\u017Cemy por\xF3wna\u0107 kluczy.",
           "warn",
         ),
       state.has &&
         !state.old &&
-        btn("Odblokuj obecny skarbiec do porównania", async () => {
+        btn("Odblokuj obecny skarbiec do por\xF3wnania", async () => {
           state.old = (await unlockDialog()) || null;
         }),
       state.old &&
-        btn("Pobierz kopię obecnego skarbca", async () => {
+        btn("Pobierz kopi\u0119 obecnego skarbca", async () => {
           download(
             "oktavarium-przed-przywroceniem.json",
             await state.old.backupFile(),
@@ -226,23 +232,24 @@ function review() {
         class: "stack",
         onsubmit: (e) => {
           e.preventDefault();
-          if (state.has && typed.value !== "ZASTĄP") {
-            state.error = "Wpisz ZASTĄP, aby potwierdzić zastąpienie.";
+          if (state.has && typed.value !== "ZAST\u0104P") {
+            state.error =
+              "Wpisz ZAST\u0104P, aby potwierdzi\u0107 zast\u0105pienie.";
             render();
             return;
           }
           if (state.has && !risk.checked && !copy.checked) {
             state.error =
-              "Potwierdź zachowanie kopii albo ryzyko utraty obecnych lokalnych kluczy.";
+              "Potwierd\u017A zachowanie kopii albo ryzyko utraty obecnych lokalnych kluczy.";
             render();
             return;
           }
           run(async () => {
-            await state.restored.save();
-            rememberVault(state.restored);
+            await restored.save();
+            rememberVault(restored);
             await enterStudio(
-              state.restored,
-              ref || state.restored.keys.find((k) => k.identity)?.identity,
+              restored,
+              ref || restored.keys.find((k) => k.identity)?.identity || null,
             );
           });
         },
@@ -252,22 +259,22 @@ function review() {
           "label",
           { class: "check" },
           copy,
-          " Zapisano kopię obecnego skarbca w bezpiecznym miejscu.",
+          " Zapisano kopi\u0119 obecnego skarbca w bezpiecznym miejscu.",
         ),
       state.has &&
         h(
           "label",
           { class: "check" },
           risk,
-          " Rozumiem ryzyko utraty kluczy, których nie ma w przywracanej kopii.",
+          " Rozumiem ryzyko utraty kluczy, kt\xF3rych nie ma w przywracanej kopii.",
         ),
-      state.has && field("Potwierdzenie zastąpienia", typed),
+      state.has && field("Potwierdzenie zast\u0105pienia", typed),
       notice(
-        "To lokalna operacja. Nie odwołuje kluczy na serwerze i nie przywraca usuniętych bajtów publikacji.",
+        "To lokalna operacja. Nie odwo\u0142uje kluczy na serwerze i nie przywraca usuni\u0119tych bajt\xF3w publikacji.",
       ),
       submit,
     ),
-    btn("Anuluj bez zastępowania", async () => {
+    btn("Anuluj bez zast\u0119powania", async () => {
       state.restored = null;
       state.error = null;
       state.backupDownloaded = false;
@@ -279,5 +286,5 @@ function review() {
   if (!state.has) state.restoring = true;
   render();
 })().catch((e) =>
-  mount(root, h("h1", {}, "Skarbiec"), notice(e.message, "bad")),
+  mount(root, h("h1", {}, "Skarbiec"), notice(failure(e).message, "bad")),
 );

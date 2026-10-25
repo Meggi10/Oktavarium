@@ -1,11 +1,14 @@
 import { h, field } from "../lib/ui.js";
 import { projectResource } from "../lib/permissions.js";
-
-export function projectSelect(id, projects, value = null) {
+function projectSelect(id, projects, value = null) {
   return h(
     "select",
     { id },
-    h("option", { value: "", selected: value == null }, "Przestrzeń główna"),
+    h(
+      "option",
+      { value: "", selected: value == null },
+      "Przestrze\u0144 g\u0142\xF3wna",
+    ),
     projects.map((p) =>
       h(
         "option",
@@ -15,11 +18,9 @@ export function projectSelect(id, projects, value = null) {
     ),
   );
 }
-
-export function projectsSection(d, { editable, selected, onSelect, act, can }) {
+function projectsSection(d, { editable, selected, onSelect, act, can }) {
   const projects = d.projects || [];
-
-  const p = projects.find((p) => p.id === selected);
+  const p = projects.find((p2) => p2.id === selected);
   const slug = h("input", {
     id: "project-slug",
     required: true,
@@ -34,7 +35,7 @@ export function projectsSection(d, { editable, selected, onSelect, act, can }) {
   const description = h("textarea", {
     id: "project-description",
     rows: 3,
-    maxlength: 1000,
+    maxlength: 1e3,
   });
   const create =
     editable &&
@@ -59,7 +60,7 @@ export function projectsSection(d, { editable, selected, onSelect, act, can }) {
         field(
           "Slug",
           slug,
-          "Małe litery, cyfry i myślniki. Nie jest identyfikatorem uprawnień.",
+          "Ma\u0142e litery, cyfry i my\u015Blniki. Nie jest identyfikatorem uprawnie\u0144.",
         ),
         field("Opis", description),
         h(
@@ -74,7 +75,6 @@ export function projectsSection(d, { editable, selected, onSelect, act, can }) {
         ),
       ),
     );
-
   return h(
     "section",
     { class: "panel", "aria-labelledby": "projects-h" },
@@ -99,9 +99,10 @@ export function projectsSection(d, { editable, selected, onSelect, act, can }) {
     h(
       "p",
       { class: "section-note" },
-      "Projekt jest zbiorem zasobów tej tożsamości. Zmiana nazwy nie zmienia ID ani uprawnień.",
+      "Projekt jest zbiorem zasob\xF3w tej to\u017Csamo\u015Bci. Zmiana nazwy nie zmienia ID ani uprawnie\u0144.",
     ),
-    !projects.length && h("p", { class: "muted" }, "Nie ma jeszcze projektów."),
+    !projects.length &&
+      h("p", { class: "muted" }, "Nie ma jeszcze projekt\xF3w."),
     p &&
       h(
         "div",
@@ -112,7 +113,7 @@ export function projectsSection(d, { editable, selected, onSelect, act, can }) {
         h(
           "p",
           {},
-          "Zakres uprawnień: ",
+          "Zakres uprawnie\u0144: ",
           h("code", {}, projectResource(d.id, p.id) + "/*"),
         ),
         p.site_url &&
@@ -124,7 +125,7 @@ export function projectsSection(d, { editable, selected, onSelect, act, can }) {
               target: "_blank",
               rel: "noopener noreferrer",
             },
-            "Otwórz stronę projektu",
+            "Otw\xF3rz stron\u0119 projektu",
           ),
         h(
           "a",
@@ -146,7 +147,6 @@ export function projectsSection(d, { editable, selected, onSelect, act, can }) {
     create,
   );
 }
-
 function projectEditor(d, p, { act, can }) {
   const title = h("input", {
     id: "project-edit-title",
@@ -163,7 +163,7 @@ function projectEditor(d, p, { act, can }) {
   });
   const description = h(
     "textarea",
-    { id: "project-edit-description", rows: 3, maxlength: 1000 },
+    { id: "project-edit-description", rows: 3, maxlength: 1e3 },
     p.meta.description || "",
   );
   const scope = projectResource(d.id, p.id);
@@ -211,15 +211,16 @@ function projectEditor(d, p, { act, can }) {
             disabled: nonempty || !can("project.delete", scope),
             onclick: () => act("project.delete", { id: p.id }),
           },
-          "Usuń pusty projekt",
+          "Usu\u0144 pusty projekt",
         ),
       ),
       nonempty &&
         h(
           "p",
           { class: "muted" },
-          "Przed usunięciem projektu usuń lub przenieś jego pliki.",
+          "Przed usuni\u0119ciem projektu usu\u0144 lub przenie\u015B jego pliki.",
         ),
     ),
   );
 }
+export { projectSelect, projectsSection };

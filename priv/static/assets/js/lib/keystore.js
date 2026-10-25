@@ -1,17 +1,10 @@
-// Skarbiec kluczy prywatnych w przeglądarce: IndexedDB + szyfrowanie hasłem
-// (PBKDF2-SHA256 -> AES-256-GCM). Hasło nie opuszcza przeglądarki; klucze leżą w bazie
-// wyłącznie zaszyfrowane. Ta sama zaszyfrowana postać jest kopią zapasową do pobrania.
 import { b64u, unb64u, enc, dec } from "./bytes.js";
-
 import { publicFromPrivate } from "./crypto.js";
-
 const DB = "oktavarium";
 const STORE = "vault";
 const SLOT = "vault";
-const ITERATIONS = 600_000;
-
-export const MIN_PASSPHRASE = 10;
-
+const ITERATIONS = 6e5;
+const MIN_PASSPHRASE = 10;
 function openDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, 1);
@@ -20,7 +13,6 @@ function openDb() {
     req.onerror = () => reject(req.error);
   });
 }
-
 async function tx(mode, fn) {
   const db = await openDb();
   try {
@@ -35,12 +27,10 @@ async function tx(mode, fn) {
     db.close();
   }
 }
-
-export const loadBlob = () => tx("readonly", (s) => s.get(SLOT));
-export const saveBlob = (blob) => tx("readwrite", (s) => s.put(blob, SLOT));
-export const clearBlob = () => tx("readwrite", (s) => s.delete(SLOT));
-export const hasVault = async () => Boolean(await loadBlob());
-
+const loadBlob = () => tx("readonly", (s) => s.get(SLOT));
+const saveBlob = (blob) => tx("readwrite", (s) => s.put(blob, SLOT));
+const clearBlob = () => tx("readwrite", (s) => s.delete(SLOT));
+const hasVault = async () => Boolean(await loadBlob());
 async function deriveKey(passphrase, salt, iterations) {
   const base = await crypto.subtle.importKey(
     "raw",
@@ -50,16 +40,14 @@ async function deriveKey(passphrase, salt, iterations) {
     ["deriveKey"],
   );
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
+    { name: "PBKDF2", hash: "SHA-256", salt: new Uint8Array(salt), iterations },
     base,
     { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"],
   );
 }
-
-/** Szyfruje dane (obiekt JSON) hasłem. Każdy zapis ma świeże sól i IV. */
-export async function seal(data, passphrase) {
+async function seal(data, passphrase) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(passphrase, salt, ITERATIONS);
@@ -79,94 +67,82 @@ export async function seal(data, passphrase) {
     ct: b64u(ct),
   };
 }
-
-export class WrongPassphrase extends Error {
+class WrongPassphrase extends Error {
   constructor() {
-    super("Nieprawidłowe hasło albo uszkodzony skarbiec.");
+    super("Nieprawid\u0142owe has\u0142o albo uszkodzony skarbiec.");
   }
 }
-
-export async function unseal(blob, passphrase) {
+async function unseal(blob, passphrase) {
   if (!blob || blob.v !== 1 || blob.kdf !== "pbkdf2-sha256")
     throw new Error("Nieznany format skarbca.");
   if (
     !Number.isInteger(blob.iterations) ||
-    blob.iterations < 100_000 ||
-    blob.iterations > 5_000_000
+    blob.iterations < 1e5 ||
+    blob.iterations > 5e6
   ) {
-    throw new Error("Nieprawidłowa liczba iteracji w skarbcu.");
+    throw new Error("Nieprawid\u0142owa liczba iteracji w skarbcu.");
   }
   try {
     const key = await deriveKey(passphrase, unb64u(blob.salt), blob.iterations);
     const plain = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: unb64u(blob.iv) },
+      { name: "AES-GCM", iv: new Uint8Array(unb64u(blob.iv)) },
       key,
-      unb64u(blob.ct),
+      new Uint8Array(unb64u(blob.ct)),
     );
     return JSON.parse(dec.decode(plain));
   } catch {
     throw new WrongPassphrase();
   }
 }
-
-/** Odblokowany skarbiec w pamięci. Każda zmiana zapisuje się zaszyfrowana. */
-export class Vault {
+class Vault {
+  data;
+  passphrase;
   constructor(data, passphrase) {
     this.data = data;
     this.passphrase = passphrase;
   }
-
   static empty(passphrase) {
     return new Vault({ v: 1, keys: [] }, passphrase);
   }
-
   static async unlock(passphrase) {
     const blob = await loadBlob();
-    if (!blob) throw new Error("W tej przeglądarce nie ma skarbca kluczy.");
+    if (!blob)
+      throw new Error("W tej przegl\u0105darce nie ma skarbca kluczy.");
     return new Vault(
       await validateVault(await unseal(blob, passphrase)),
       passphrase,
     );
   }
-
   get keys() {
     return this.data.keys;
   }
-
   get(id) {
     return this.data.keys.find((k) => k.id === id) || null;
   }
-
   ofKind(kind) {
     return this.data.keys.filter((k) => k.kind === kind);
   }
-
   add(key) {
     if (!this.get(key.id)) this.data.keys.push(key);
   }
-
   update(id, changes) {
     Object.assign(this.get(id) || {}, changes);
   }
-
   async save() {
     await saveBlob(await seal(this.data, this.passphrase));
   }
-
   /** Plik kopii zapasowej (zaszyfrowany tym samym hasłem). */
   async backupFile() {
     const vault = await seal(this.data, this.passphrase);
     return {
       oktavarium: "vault-backup",
       v: 1,
-      created: new Date().toISOString(),
+      created: /* @__PURE__ */ new Date().toISOString(),
       vault,
     };
   }
 }
-
-/** Przywraca skarbiec z pliku kopii. Zwraca odblokowany `Vault` (jeszcze niezapisany). */
-export async function restoreBackup(file, passphrase) {
+async function restoreBackup(file, passphrase) {
   if (file?.oktavarium !== "vault-backup" || file.v !== 1)
     throw new Error("To nie jest kopia zapasowa skarbca Oktavarium.");
   return new Vault(
@@ -174,9 +150,7 @@ export async function restoreBackup(file, passphrase) {
     passphrase,
   );
 }
-
-/** Plik klucza w formacie CLI (`mix oktavarium.key.gen`): jawny, tylko na własną odpowiedzialność. */
-export async function cliKeyfile(key, publicId) {
+async function cliKeyfile(key, publicId) {
   return {
     v: 1,
     kind: key.kind,
@@ -185,12 +159,10 @@ export async function cliKeyfile(key, publicId) {
     private: key.private,
   };
 }
-
-/** Validate decrypted imports before replacing IndexedDB. Labels are not identities. */
-export async function validateVault(data) {
-  if (data?.v !== 1 || !Array.isArray(data.keys) || data.keys.length > 1000)
-    throw new Error("Nieprawidłowa zawartość skarbca.");
-  const ids = new Set();
+async function validateVault(data) {
+  if (data?.v !== 1 || !Array.isArray(data.keys) || data.keys.length > 1e3)
+    throw new Error("Nieprawid\u0142owa zawarto\u015B\u0107 skarbca.");
+  const ids = /* @__PURE__ */ new Set();
   for (const key of data.keys) {
     if (
       !key ||
@@ -200,9 +172,25 @@ export async function validateVault(data) {
       ids.has(key.id) ||
       (await publicFromPrivate(key.private)) !== key.id
     ) {
-      throw new Error("Kopia zawiera nieprawidłowy lub powtórzony klucz.");
+      throw new Error(
+        "Kopia zawiera nieprawid\u0142owy lub powt\xF3rzony klucz.",
+      );
     }
     ids.add(key.id);
   }
   return data;
 }
+export {
+  MIN_PASSPHRASE,
+  Vault,
+  WrongPassphrase,
+  clearBlob,
+  cliKeyfile,
+  hasVault,
+  loadBlob,
+  restoreBackup,
+  saveBlob,
+  seal,
+  unseal,
+  validateVault,
+};

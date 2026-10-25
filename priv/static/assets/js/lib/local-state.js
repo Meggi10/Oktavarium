@@ -1,18 +1,19 @@
 let unlocked = null;
-export const localVault = () => unlocked;
-export function rememberVault(vault) {
+const localVault = () => unlocked;
+function rememberVault(vault) {
   unlocked = vault;
 }
-export function lockVault() {
+function lockVault() {
   if (unlocked) {
     unlocked.passphrase = "";
     unlocked.data = { v: 1, keys: [] };
   }
   unlocked = null;
 }
-export async function enterStudio(vault, ref = null) {
+async function enterStudio(vault, ref = null) {
   rememberVault(vault);
   const root = document.getElementById("app");
+  if (!root) throw new Error("Brak kontenera aplikacji.");
   root.dataset.page = "studio";
   root.classList.remove("auth-app");
   const q = new URLSearchParams();
@@ -21,3 +22,4 @@ export async function enterStudio(vault, ref = null) {
   const studio = await import("../pages/studio.js");
   await studio.start();
 }
+export { enterStudio, localVault, lockVault, rememberVault };

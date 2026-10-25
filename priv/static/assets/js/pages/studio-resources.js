@@ -1,8 +1,8 @@
+import { failure } from "../lib/failure.js";
 import { h, field } from "../lib/ui.js";
 import { fileResource } from "../lib/permissions.js";
 import { projectSelect } from "./studio-projects.js";
-
-export const KIND_LABEL = {
+const KIND_LABEL = {
   image: "Obraz",
   audio: "Nagranie",
   site: "Plik strony",
@@ -32,17 +32,15 @@ const TYPES = {
   flac: "audio/flac",
   m4a: "audio/mp4",
 };
-export const fmtSize = (n) =>
+const fmtSize = (n) =>
   n >= 1048576
     ? (n / 1048576).toFixed(1) + " MiB"
     : n >= 1024
       ? (n / 1024).toFixed(1) + " KiB"
       : n + " B";
-
-export function buildPath(kind, raw) {
+function buildPath(kind, raw) {
   if (kind === "site") {
     const p = raw.replace(/^\/+/, "");
-    // Backend permits at most seven segments below site/ and 200 bytes total.
     const path = "site/" + p;
     return /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,79}){0,6}$/.test(
       p,
@@ -57,7 +55,6 @@ export function buildPath(kind, raw) {
     .slice(0, 80);
   return slug ? (kind === "image" ? "images/" : "audio/") + slug : null;
 }
-
 const ACCEPTED = {
   image: ["image/png", "image/jpeg", "image/gif", "image/webp"],
   audio: ["audio/mpeg", "audio/ogg", "audio/wav", "audio/flac", "audio/mp4"],
@@ -79,7 +76,7 @@ const ACCEPTED = {
     "audio/ogg",
   ],
 };
-export function validateFile(file, path, type) {
+function validateFile(file, path, type) {
   const kind = path.startsWith("images/")
     ? "image"
     : path.startsWith("audio/")
@@ -87,7 +84,7 @@ export function validateFile(file, path, type) {
       : "site";
   if (!ACCEPTED[kind].includes(type))
     throw new Error(
-      "Ten format nie jest obsługiwany w wybranym rodzaju zasobu.",
+      "Ten format nie jest obs\u0142ugiwany w wybranym rodzaju zasobu.",
     );
   const max = { image: 10, audio: 50, site: 5 }[kind] * 1024 * 1024;
   if (!file.size || file.size > max)
@@ -95,7 +92,7 @@ export function validateFile(file, path, type) {
       "Plik jest pusty lub przekracza limit " + fmtSize(max) + ".",
     );
 }
-export function resourcesSection(
+function resourcesSection(
   d,
   { editable, selected, act, publishFile, say, can },
 ) {
@@ -107,7 +104,7 @@ export function resourcesSection(
   const search = h("input", {
     id: "resource-search",
     type: "search",
-    placeholder: "Nazwa lub ścieżka",
+    placeholder: "Nazwa lub \u015Bcie\u017Cka",
     "aria-label": "Szukaj zasobu",
   });
   const kind = h(
@@ -154,7 +151,7 @@ export function resourcesSection(
               "p",
               { class: "hint" },
               h("code", {}, r.path),
-              " · ",
+              " \xB7 ",
               fmtSize(r.size),
             ),
             h(
@@ -162,14 +159,14 @@ export function resourcesSection(
               { class: "hint" },
               ownerProject
                 ? "Projekt: " + (ownerProject.meta.title || ownerProject.slug)
-                : "Przestrzeń główna",
+                : "Przestrze\u0144 g\u0142\xF3wna",
             ),
             r.meta.description && h("p", {}, r.meta.description),
             r.available === false
               ? h(
                   "p",
                   { class: "notice warn" },
-                  "Treść niedostępna. Referencja i historia pozostają.",
+                  "Tre\u015B\u0107 niedost\u0119pna. Referencja i historia pozostaj\u0105.",
                 )
               : h(
                   "div",
@@ -183,7 +180,7 @@ export function resourcesSection(
                         target: "_blank",
                         rel: "noopener noreferrer",
                       },
-                      "Otwórz",
+                      "Otw\xF3rz",
                     ),
                   h(
                     "a",
@@ -198,7 +195,7 @@ export function resourcesSection(
     );
     count.textContent = filtered.length
       ? "Pliki: " + filtered.length
-      : "Brak plików pasujących do tego zakresu i filtra.";
+      : "Brak plik\xF3w pasuj\u0105cych do tego zakresu i filtra.";
   };
   search.addEventListener("input", renderList);
   kind.addEventListener("change", renderList);
@@ -211,7 +208,7 @@ export function resourcesSection(
       "p",
       { class: "section-note" },
       selected === "all"
-        ? "Wszystkie pliki tożsamości, także w projektach."
+        ? "Wszystkie pliki to\u017Csamo\u015Bci, tak\u017Ce w projektach."
         : "Pliki wybranej przestrzeni.",
     ),
     h("div", { class: "toolbar" }, search, kind),
@@ -221,17 +218,16 @@ export function resourcesSection(
       ? h(
           "details",
           { class: "upload-section" },
-          h("summary", {}, "Dodaj materiał"),
+          h("summary", {}, "Dodaj materia\u0142"),
           uploadForm(d, selected, { publishFile, say }),
         )
       : h(
           "p",
           { class: "hint" },
-          "Odblokuj klucze, aby przygotować publikację. Odczyt nie wymaga logowania.",
+          "Odblokuj klucze, aby przygotowa\u0107 publikacj\u0119. Odczyt nie wymaga logowania.",
         ),
   );
 }
-
 function uploadForm(d, projectId, { publishFile, say }) {
   const kind = h(
     "select",
@@ -265,12 +261,12 @@ function uploadForm(d, projectId, { publishFile, say }) {
   const preview = h(
     "p",
     { class: "hint", role: "status" },
-    "Nie wysyłamy pliku przy wyborze.",
+    "Nie wysy\u0142amy pliku przy wyborze.",
   );
   file.addEventListener("change", () => {
     const f = file.files[0];
     preview.textContent = f
-      ? f.name + " · " + fmtSize(f.size)
+      ? f.name + " \xB7 " + fmtSize(f.size)
       : "Nie wybrano pliku.";
   });
   return h(
@@ -284,9 +280,12 @@ function uploadForm(d, projectId, { publishFile, say }) {
         if (!f) return;
         try {
           if (target.value === "__choose")
-            throw new Error("Wybierz projekt albo przestrzeń główną.");
+            throw new Error(
+              "Wybierz projekt albo przestrze\u0144 g\u0142\xF3wn\u0105.",
+            );
           const path = buildPath(kind.value, name.value.trim() || f.name);
-          if (!path) throw new Error("Nieprawidłowa ścieżka pliku.");
+          if (!path)
+            throw new Error("Nieprawid\u0142owa \u015Bcie\u017Cka pliku.");
           const type =
             TYPES[(f.name.split(".").pop() || "").toLowerCase()] || f.type;
           validateFile(f, path, type);
@@ -297,28 +296,27 @@ function uploadForm(d, projectId, { publishFile, say }) {
             meta: readMeta(meta),
           });
         } catch (err) {
-          say(err.message, "bad");
+          say(failure(err).message, "bad");
         }
       },
     },
     field("Cel publikacji", target),
     h("div", { class: "grid2" }, field("Rodzaj", kind), field("Plik", file)),
     preview,
-    field("Nazwa / ścieżka względna", name),
+    field("Nazwa / \u015Bcie\u017Cka wzgl\u0119dna", name),
     metaFields(meta),
     h(
       "p",
       { class: "notice warn" },
-      "Po potwierdzeniu bajty trafią do serwera. Mogą być odczytywalne po skrócie, nawet jeśli publikacja zostanie odrzucona. Pliki stron uruchamiaj wyłącznie pod ich odrębnym adresem.",
+      "Po potwierdzeniu bajty trafi\u0105 do serwera. Mog\u0105 by\u0107 odczytywalne po skr\xF3cie, nawet je\u015Bli publikacja zostanie odrzucona. Pliki stron uruchamiaj wy\u0142\u0105cznie pod ich odr\u0119bnym adresem.",
     ),
     h(
       "button",
       { id: "upload", class: "btn primary", type: "submit" },
-      "Sprawdź publikację",
+      "Sprawd\u017A publikacj\u0119",
     ),
   );
 }
-
 function fileEditor(d, r, { act, say, can }) {
   const path = h("input", {
     id: "path-" + r.id,
@@ -332,7 +330,7 @@ function fileEditor(d, r, { act, say, can }) {
   return h(
     "details",
     { class: "resource-edit" },
-    h("summary", {}, "Edytuj lub przenieś"),
+    h("summary", {}, "Edytuj lub przenie\u015B"),
     h(
       "form",
       {
@@ -343,7 +341,10 @@ function fileEditor(d, r, { act, say, can }) {
           const moved =
             path.value !== r.path || targetProject !== (r.project_id || null);
           if (moved && !can("resource.delete", source))
-            return say("Przeniesienie wymaga resource.delete w źródle.", "bad");
+            return say(
+              "Przeniesienie wymaga resource.delete w \u017Ar\xF3dle.",
+              "bad",
+            );
           const dest = fileResource(d.id, path.value, targetProject);
           if (!can("resource.put", dest))
             return say("Brak prawa resource.put w miejscu docelowym.", "bad");
@@ -358,7 +359,7 @@ function fileEditor(d, r, { act, say, can }) {
           });
         },
       },
-      field("Ścieżka", path),
+      field("\u015Acie\u017Cka", path),
       field("Projekt docelowy", project),
       metaFields(meta),
       h(
@@ -377,19 +378,18 @@ function fileEditor(d, r, { act, say, can }) {
             disabled: !can("resource.delete", source),
             onclick: () => act("resource.delete", { id: r.id }),
           },
-          "Usuń plik",
+          "Usu\u0144 plik",
         ),
       ),
     ),
   );
 }
-
 function metaInputs(prefix, meta) {
   return Object.fromEntries(
     [
       ["title", 120],
       ["alt", 300],
-      ["description", 1000],
+      ["description", 1e3],
       ["collection", 40],
     ].map(([key, limit]) => [
       key,
@@ -414,8 +414,9 @@ const readMeta = (inputs) =>
       .filter(([, v]) => v),
   );
 const metaFields = (inputs) => [
-  field("Tytuł", inputs.title),
+  field("Tytu\u0142", inputs.title),
   field("Tekst alternatywny", inputs.alt),
   field("Opis", inputs.description),
   field("Kolekcja", inputs.collection),
 ];
+export { KIND_LABEL, buildPath, fmtSize, resourcesSection, validateFile };
